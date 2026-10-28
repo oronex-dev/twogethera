@@ -118,3 +118,9 @@ This is a functional foundation preview. Accounts, partner linking, planner oper
 ## CP-002 architecture blueprint
 
 The proposed data model, security policies, partner linking, offline protocol, lifecycle, and application contracts are documented in [docs/architecture/README.md](docs/architecture/README.md). These are planning specifications only; no backend or authentication is implemented. See the decision register and CP-003 approval gate before implementation.
+
+## CP-003A visual system
+
+The app now includes an original glossy-gradient identity, adaptive Home/Studio/Appearance navigation, reusable UI components, and refined light/dark themes. The Studio at `/#/studio` provides working ephemeral interaction previews. Product architecture decisions D01–D11 remain pending.
+
+See [visual system](docs/design/VISUAL_SYSTEM.md), [preview gallery](docs/design/PREVIEWS.md), and [implementation report](docs/CP-003A.md). No authentication, backend, database, or persistent preferences have been introduced.

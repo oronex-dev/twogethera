@@ -4,15 +4,30 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
+import '../../features/design_studio/presentation/design_studio_screen.dart';
+import '../../shared/widgets/adaptive_shell.dart';
 import '../../shared/widgets/responsive_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     routes: [
-      GoRoute(path: '/', builder: (context, state) => const DashboardScreen()),
-      GoRoute(
-        path: '/settings',
-        builder: (context, state) => const SettingsScreen(),
+      ShellRoute(
+        builder: (context, state, child) =>
+            AdaptiveShell(path: state.uri.path, child: child),
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) => const DashboardScreen(),
+          ),
+          GoRoute(
+            path: '/studio',
+            builder: (context, state) => const DesignStudioScreen(),
+          ),
+          GoRoute(
+            path: '/settings',
+            builder: (context, state) => const SettingsScreen(),
+          ),
+        ],
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

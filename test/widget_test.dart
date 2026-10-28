@@ -19,6 +19,10 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Thoughtfully built for a life together.'),
         200,
+        scrollable: find.descendant(
+          of: find.byKey(const ValueKey('page-scroll')),
+          matching: find.byType(Scrollable),
+        ),
       );
       expect(tester.takeException(), isNull);
     });
