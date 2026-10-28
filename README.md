@@ -121,6 +121,10 @@ The proposed data model, security policies, partner linking, offline protocol, l
 
 ## CP-003A visual system
 
-The app now includes an original glossy-gradient identity, adaptive Home/Studio/Appearance navigation, reusable UI components, and refined light/dark themes. The Studio at `/#/studio` provides working ephemeral interaction previews. Product architecture decisions D01–D11 remain pending.
+The app now includes an original glossy-gradient identity, adaptive Home/Studio/Appearance navigation, reusable UI components, and refined light/dark themes. The Studio at `/#/studio` provides working ephemeral interaction previews. Architecture decision status is maintained in the architecture register; visual approval does not approve product data policies.
 
 See [visual system](docs/design/VISUAL_SYSTEM.md), [preview gallery](docs/design/PREVIEWS.md), and [implementation report](docs/CP-003A.md). No authentication, backend, database, or persistent preferences have been introduced.
+
+## CP-003B · D01–D03 resolution
+
+D01 is approved; D02 is approved with safeguards; D03 records a revised minimal-audit-history policy with implementation-level privacy choices unresolved. D04–D11 remain pending. See [decision record and open P01–P09](docs/architecture/D01_D03_RESOLUTION.md) and [current approval register](docs/architecture/APPROVAL_REVIEW.md). Earlier milestone reports/design documentation describe their historical approval state; the current architecture register takes precedence for product-policy status. CP-003B Part 1 is documentation only and preserves the approved visual design.

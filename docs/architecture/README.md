@@ -2,6 +2,10 @@
 
 Status: **proposed architecture; not deployed or security-certified**. Prepared 28 October 2026. No migrations, Dart implementation classes, authentication UI, dependencies, credentials, or backend connections are introduced. CP-001 remains the runnable baseline.
 
+## Current reconciliation
+
+Read [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) first for the complete current matrix and policy/schema/protocol reconciliation. D01/D02 remain approved; D03 remains a recorded revision with unresolved implementation details. The user has technically endorsed the listed directions pending formal approval; P03/P04/P09 still need product resolution. Earlier proposal wording below is preserved history, not competing current defaults. No implementation is authorized.
+
 ## Reading order
 
 1. [Data model and ER diagram](DATA_MODEL.md)
@@ -14,15 +18,17 @@ Status: **proposed architecture; not deployed or security-certified**. Prepared 
 
 These documents specify a design to implement and test. Policy predicates and transaction algorithms are specifications, not runnable SQL. Database concurrency and adversarial authorization tests are required before any claim of production security.
 
-## Decisions requiring product approval
+## Original product decision register — preserved history
 
-The following defaults let planning proceed. **They are proposals, not approved product policies.** Approve or revise these before implementing the affected migrations or workflows.
+Current CP-003B Part 1 status: **D01 approved; D02 approved with safeguards; D03 revised policy recorded, with implementation privacy choices unresolved. D04–D11 remain pending.** The user decisions and open P01–P09 choices are recorded in [D01_D03_RESOLUTION.md](D01_D03_RESOLUTION.md). This is documentation-only authorization; migrations/authentication remain out of scope.
 
-| ID | Proposed decision | Consequence |
+For D01–D03, the table below contains the current user wording; D04–D11 retain their original proposed wording. Preliminary technical mechanisms remain designs to validate, not deployed or implicitly approved implementations.
+
+| ID | Decision / proposal | Status / consequence |
 | --- | --- | --- |
-| D01 | One current couple per account; draft has one member, paired space exactly two; archived spaces cannot be reopened or receive a replacement partner | A new relationship gets a new space; historical access never carries to the new partner |
-| D02 | Either partner can unlink without the other's permission; leaver immediately loses server access; remaining partner receives a read-only archive | Remaining partner may form a new couple; no automatic merge or transfer of old data |
-| D03 | Shared text and exact-money ledger records remain in the remaining partner's archive after account deletion, with erased-person attribution pseudonymized; departing person's uploaded photos are removed | Shared-data ownership and privacy policy require explicit product/legal review before launch |
+| D01 | One active couple space per account, maximum two active members. Archived spaces cannot be reopened or reused with a replacement partner. | Approved. Active membership limits fixed; archived spaces cannot be reused; draft state details remain proposed. |
+| D02 | Either partner may unlink independently. The departing partner immediately loses server access. The remaining partner may receive a read-only archive, subject to the D03 privacy and retention rules. Do not claim that previously downloaded data can be remotely erased. | Approved with safeguards. Archive access is conditional on D03; delivered/downloaded data cannot be remotely erased. |
+| D03 | Preserve only necessary, auditable contribution history with pseudonymized attribution after account deletion. Shared text, notes, and photographs must have a clearly documented removal, retention, and export process. Do not assume indefinite retention of all shared content. | Revised policy recorded. No indefinite shared-content assumption; resolve P01–P09 before affected implementation. |
 | D04 | Change log/tombstones retained at least 90 days; offline read lease at most 7 days; account deletion grace 30 days; unreferenced uploads 24 hours; exports 24 hours | Stale clients require full snapshots; cached offline data cannot be remotely recalled |
 | D05 | One immutable ISO currency and minor-unit exponent per savings goal; recorded deposits and exact reversals only; no FX, bank integration, interest, or withdrawal workflow initially | Amounts never use floating point; planner records do not claim to verify real bank balances |
 | D06 | Invite is bound to a verified email identity, lasts 24 hours, and is single-use; user shares the link manually | No anonymous redemption or automatic email delivery; changing recipient requires a replacement invite |
@@ -36,7 +42,7 @@ Bounds in the schema (text lengths, money magnitude, upload sizes, rate limits) 
 
 ## Baseline protection
 
-Historical CP-002 record below. The subsequent user-authorized Git baseline and advisory decision review are recorded in [APPROVAL_REVIEW.md](APPROVAL_REVIEW.md); original decision proposals remain unchanged.
+Historical CP-002 record below. The subsequent user-authorized Git baseline and advisory decision review are recorded in [APPROVAL_REVIEW.md](APPROVAL_REVIEW.md); the historical review is retained, with current D01–D03 outcomes and unresolved privacy gates now recorded above.
 
 `git status` / `git rev-parse --show-toplevel` report **not a git repository** at `/Users/fielmark.oronos/Developer/twogethera`. Therefore no local baseline commit is possible under the requested conditional instruction. No repository or remote was created; nothing was pushed. The unrelated original chat directory was not used.
 
@@ -55,3 +61,7 @@ Design choices are Twogethera proposals. Platform behavior was checked against p
 - [Drift transactions](https://drift.simonbinder.eu/dart_api/transactions/), [web persistence](https://drift.simonbinder.eu/platforms/web/), and [migrations](https://drift.simonbinder.eu/migrations/): local database capabilities and platform constraints.
 
 Select the actual PostgreSQL/Supabase versions and verify feature compatibility when a development backend is approved; no database version has been provisioned here.
+
+## CP-003B Part 2 — pending consolidated review
+
+[FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md) reviews all nine open privacy choices and D04–D11, with specific recommended wording, risks, dependencies, disclosures and pending approval states. It is an advisory candidate, not an amendment to recorded approvals or authorization to implement a backend. Earlier proposals and history above remain unchanged; reconcile designs only after explicit user approval.

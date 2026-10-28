@@ -1,5 +1,7 @@
 # Implementation sequence, approval gates, and verification
 
+**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for final proposed wording, status, tests, disclosures and implementation gates. D01/D02 approvals and D03’s recorded revision are preserved. Technical endorsement is pending formal approval; P03/P04/P09 product choices remain unresolved. No backend implementation is authorized.
+
 **CP-002 stops at this blueprint.** No migration, Auth screen, backend connection, product module, or speculative Dart contract class has been implemented. All tests below described as future gates are requirements, not claims that a backend exists or was tested.
 
 ## CP-001 baseline verification for CP-002
@@ -21,20 +23,17 @@ Project root: `/Users/fielmark.oronos/Developer/twogethera`. Inspected README, f
 
 Shell commands are invoked through `rtk proxy` per the user's RTK instructions. No Git initialization, commit, remote creation, or push occurred. If version control is desired, explicitly authorize local Git initialization and review a baseline before continuing; CP-002 does not infer that authorization from the conditional commit instruction.
 
-## Recommended CP-003 scope (requires approval)
+## Current recommended CP-004 sequence — explicit authorization required
 
-Build the **smallest executable data/security foundation**, not the full couples planner:
+The Flutter foundation and approved CP-003A UI remain unchanged. [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) supersedes earlier implementation recommendations and defines the current formal-approval and product gates. No migration/Auth/backend work begins in this documentation task.
 
-1. Resolve [D01–D11](README.md), especially unilateral unlink/archive access, shared-record retention, account-erasure/media behavior, and offline-read risk. Verify target jurisdictions/privacy notice, deployment/version support, and local encryption feasibility before claiming privacy properties.
-2. If separately authorized, initialize local Git in this exact directory and commit the CP-001 baseline with reviewed ignore rules. Check staged paths/content for credentials/generated files; keep pubspec.lock. No remote/push by default.
-3. Implement minimal pure-Dart identity/scope/revision/Money values and typed outcomes only as needed for the first vertical slice. Preserve app routes/themes/screens and existing tests. Add meaningful money/decimal-string/web-boundary tests, not empty repository stubs.
-4. Design and review migrations in an isolated local Supabase/PostgreSQL development environment **only after explicit migration approval**. Start with app_users/profiles, couple_spaces/memberships, invitations, currencies, sync counters/receipts, private helpers, explicit grants/RLS, and lifecycle hooks. Do not start Bucket List, plans, or live production tables.
-5. Exercise real verified-identity fixtures and concurrency tests locally: one active couple per account, draft/paired count invariants, double/third invite acceptance, timeout retry, revocation races, and no direct DML bypass. Do not ship a mock-auth flow. Real Auth UI/integration also requires the user's next authorization.
-6. Spike Drift persistence/migrations across Android/iOS/web, exact integer codecs, worker deployment, quota failure, encrypted local storage/key lifecycle, and cross-account wipe. Select packages based on verified needs; no premature Storage/notifications dependencies. Native encryption and web confidentiality cannot be assumed equivalent.
-7. Prove an end-to-end local-only sync fixture with outbox transactions, commit-ordered scope log, immutable snapshots, conflict handling, receipt-based retry, and membership revocation. Use synthetic test data, not a production couple or fake shipped backend. Avoid a full product module until the protocol is validated.
-8. Document evidence and limitations, run existing Flutter checks, review changes, and stop for the next milestone. Connecting any live project, configuring credentials, production migrations, or expanding feature scope needs explicit authorization.
+1. Formally approve endorsed directions and resolve P03/P04/P09. Approve concrete archive/ordinary-text/audit policy values, classifications/review and disclosures. D01/D02 need no reapproval; D03's revision remains recorded with implementation details incomplete.
+2. First separately authorized backend milestone: isolated local synthetic-data identity/scope authorization proof. Review account-state gate, unique active membership/two seats, draft/paired/closed transitions, canonical locking and atomic single-use invite/idempotency. Prove RLS/grant isolation, concurrency and old-JWT denial before integrating UI or a live project.
+3. Include epoch/first-closure/account-denial seams; keep unavailable archive/export/content paths denied. Do not implement placeholder 365-day retention or blanket survivor deletion to bypass product gates.
+4. Prove protected native persistence/key/temp/media/credential lifecycle; initial sensitive web remains online/session-memory without a durable sensitive outbox. A new verified browser persistence design needs separate approval. No dependency is added by this review.
+5. After policy approval, stage ownership-aware content and exact ledger separation, privacy reset/cleanup/restore, authenticated media and export as small tested slices. Preserve current Riverpod/go_router/visual layout and run regression checks when actual code changes are separately authorized.
 
-If CP-003 is intended to remain entirely backend-free, limit it to approved domain values and Drift feasibility/tests; do not present RLS/linking security as verified until the database integration work is approved and run.
+Readiness is conditional for an explicitly scoped isolated foundation slice, **not** full schema freeze, production deployment or unapproved archive/deletion behavior. All future security gates below still apply. Historical CP-002 baseline statements above describe that earlier milestone, not current Git state.
 
 ## Database/security gates before a usable paired space
 
@@ -47,7 +46,7 @@ If CP-003 is intended to remain entirely backend-free, limit it to approved doma
 
 ## Sync/local gates before offline writes ship
 
-- Drift write/outbox/overlay atomicity under forced crashes, device full, transaction rollback, browser eviction/private mode, app upgrade, and multiple tabs/workers.
+- Drift write/outbox/overlay atomicity under forced crashes, device full, transaction rollback, native app upgrade and worker coordination; web tests verify no sensitive durable persistence and honest unsaved-state handling.
 - Migration tests preserve IDs and pending commands; validate all schema upgrades and rollback/recovery strategy before deploying incompatible versions.
 - Delayed commit ordering, missed/duplicate realtime hints, paginated transaction boundaries, cursor floor/snapshot fallback, interrupted snapshots, and stale optimistic overlays must converge deterministically.
 - Pull authorization on every page and receipt/status query; account/scope change stops pending writes before they are sent. Exercise revoked-member caches and expired leases without promising remote deletion of prior copies.
@@ -58,7 +57,7 @@ If CP-003 is intended to remain entirely backend-free, limit it to approved doma
 
 1. This is a specification: policy correctness and race guarantees need executable PostgreSQL/Supabase tests. No production security certification is implied.
 2. Offline access and copies already delivered cannot be instantly revoked. Encryption/browser-origin protection needs a platform feasibility decision; E2EE would require a different key-management/sync design.
-3. Indefinite shared archive retention versus erasure requests is a policy conflict requiring consent/legal review. Photo subject rights extend beyond uploader ownership.
+3. Indefinite default shared-content retention has been rejected as an assumption by revised D03. Technical directions for audit minimization/pseudonyms/media/export/recovery/copy cleanup are endorsed pending formal approval. Revised P03/P04/P09 remain unresolved product gates; ownership-aware archives must preserve eligible survivor records and subject privacy. No automatic 365-day audit duration.
 4. Serializing per-scope writes is appropriate for two members but long snapshots/deletion batches can block writes. Set and load-test bounded snapshot/command quotas and a measured timeout before rollout; never silently truncate financial history.
 5. Auth session/device revocation, reliable deletion jobs, Storage cleanup/caching, notifications, and provider backup retention vary by deployment configuration and need actual integration verification.
 6. Timezone database updates, DST/Feb-29 rules, currency catalog changes, and JSON/SQLite integer codecs need versioned compatibility tests across web and native.
@@ -69,3 +68,11 @@ If CP-003 is intended to remain entirely backend-free, limit it to approved doma
 Created only `docs/architecture/README.md`, `DATA_MODEL.md`, `SECURITY_MODEL.md`, `PARTNER_LINKING.md`, `OFFLINE_SYNC.md`, `DATA_LIFECYCLE.md`, `APPLICATION_CONTRACTS.md`, and this file; root README gains only an architecture link. No dependencies, application tests/source, or platform configurations are intentionally changed. Final checks: 8 architecture documents, 5 Mermaid diagrams, all local Markdown links/fences valid, approval IDs D01–D11 present. Mermaid text was inspected but not rendered by a diagram engine. `dart format --output=none --set-exit-if-changed lib test` passed (12 files, no changes). Final disk check: about 42 GiB free.
 
 Approval gate: user approval of architecture decisions and CP-003 scope is required before implementing database migrations or authentication. This milestone ends with documentation.
+
+## CP-003B Part 1 documentation checkpoint
+
+D01–D03 policy resolution supersedes incompatible CP-002 assumptions. Do not reopen D01's active limits as if unapproved, turn D02's conditional archive into an automatic full-content grant, or preserve contribution notes/all shared text indefinitely under D03. Complete P01–P09 and later D04–D11 resolution through separate authorized work before the affected implementation. No migration, Supabase/Auth work, Flutter change, commit or next decision part is authorized by this checkpoint.
+
+## Current reconciliation checkpoint
+
+See the consolidated specification for 20 decision statuses, ownership/deletion matrix, per-decision tests and ten contradiction dispositions. Historical CP-002/Part 1 stopping records above are preserved; they do not override the current technical endorsements or authorize implementation. No commit/push or application change is part of this reconciliation.

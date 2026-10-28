@@ -1,6 +1,8 @@
 # CP-002 architecture approval review and Git baseline
 
-Prepared 28 October 2026. **All decisions remain pending user approval.** Titles below are review labels; the proposal and documented consequence are copied verbatim from the CP-002 register. Recommendations are advisory and do not amend or approve the source register.
+> **Historical decision record.** The body below preserves this review stage and its then-current statuses. The latest user directions and reconciled proposals are in [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md). Earlier blanket nonfinancial deletion, no-text-recovery and automatic 365-day audit recommendations are superseded there; they are not current policy. D01/D02 approvals and D03's recorded revision remain unchanged.
+
+Prepared 28 October 2026. **CP-003B Part 1: D01 approved; D02 approved with safeguards; D03 revised policy recorded, with implementation privacy choices unresolved. D04–D11 remain pending.** Titles are review labels. D01–D03 below reflect the current user decisions, superseding earlier advisory recommendations. D04–D11 preserve the original proposals/consequences and remain advisory. See [the resolution record](D01_D03_RESOLUTION.md) for open P01–P09 choices.
 
 ## Baseline and validation
 
@@ -14,51 +16,33 @@ Prepared 28 October 2026. **All decisions remain pending user approval.** Titles
 
 ### D01 — Couple membership and archives
 
-**Current proposal (verbatim):**
+**Recorded user decision (verbatim):**
 
-> One current couple per account; draft has one member, paired space exactly two; archived spaces cannot be reopened or receive a replacement partner
+> One active couple space per account, maximum two active members. Archived spaces cannot be reopened or reused with a replacement partner.
 
-**Documented consequence (verbatim):**
-
-> A new relationship gets a new space; historical access never carries to the new partner
-
-- **Alternatives:** Allow multiple concurrent couple spaces; or let an archived space accept a replacement partner.
-- **Security and UX:** One current couple is easier to understand and authorize. A new space prevents a new partner from inheriting intimate history. Multiple spaces add membership, notification, and navigation complexity.
-- **Recommendation:** Keep the current proposal. Preserve read-only archive access separately from current membership.
-- **Finalize before database implementation?** Yes — it determines uniqueness constraints, state transitions, and tenant boundaries.
-- **Approval status:** Pending user decision.
+- **Approval status:** Approved.
+- **Effect:** One active couple space per account and at most two active members; no reopening or replacement-partner reuse of archives. Existing draft/paired state details remain proposed rather than newly approved. Technical constraints still require later implementation and tests.
+- **Implementation gate:** Validate the active-membership and no-reuse constraints later; no database implementation is authorized now.
 
 ### D02 — Unlinking and remaining-partner access
 
-**Current proposal (verbatim):**
+**Recorded user decision (verbatim):**
 
-> Either partner can unlink without the other's permission; leaver immediately loses server access; remaining partner receives a read-only archive
+> Either partner may unlink independently. The departing partner immediately loses server access. The remaining partner may receive a read-only archive, subject to the D03 privacy and retention rules. Do not claim that previously downloaded data can be remotely erased.
 
-**Documented consequence (verbatim):**
-
-> Remaining partner may form a new couple; no automatic merge or transfer of old data
-
-- **Alternatives:** Revoke access for both partners; provide a time-limited archive; or require mutual approval to unlink.
-- **Security and UX:** Unilateral exit prevents one partner blocking the other from leaving. An archive preserves the remaining partner’s records but retains sensitive shared material. Access already downloaded cannot be recalled.
-- **Recommendation:** Keep unilateral unlinking and a read-only archive, conditional on explicit disclosure and resolving D03. Never require partner permission to leave.
-- **Finalize before database implementation?** Yes — membership transitions, archive authorization, and lifecycle behavior depend on this.
-- **Approval status:** Pending user decision.
+- **Approval status:** Approved with safeguards.
+- **Effect:** Unilateral unlinking is approved. Departing users lose former-scope server access immediately. Remaining-partner archives are conditional on D03, not guaranteed full-content retention. Existing downloads cannot be remotely recalled.
+- **Implementation gate:** Resolve the applicable [P01–P09 privacy choices](D01_D03_RESOLUTION.md) before archive/retention/export/erasure implementation; no fallback policy is selected.
 
 ### D03 — Shared records and account erasure
 
-**Current proposal (verbatim):**
+**Recorded user decision (verbatim):**
 
-> Shared text and exact-money ledger records remain in the remaining partner's archive after account deletion, with erased-person attribution pseudonymized; departing person's uploaded photos are removed
+> Preserve only necessary, auditable contribution history with pseudonymized attribution after account deletion. Shared text, notes, and photographs must have a clearly documented removal, retention, and export process. Do not assume indefinite retention of all shared content.
 
-**Documented consequence (verbatim):**
-
-> Shared-data ownership and privacy policy require explicit product/legal review before launch
-
-- **Alternatives:** Erase all shared content; remove author-owned content; keep only a minimal pseudonymous ledger; or offer an export window before purge.
-- **Security and UX:** Retention protects the other partner’s history, but text/photos may identify the departing person even after profile labels are removed. Pseudonymization is not anonymity. Uploader ownership does not resolve rights of other people depicted in photos.
-- **Recommendation:** Do not approve indefinite shared-text retention by default yet. Settle the ownership/erasure policy explicitly; favor a minimal pseudonymous ledger and a clear text/media removal process, with privacy review before launch.
-- **Finalize before database implementation?** Yes — before shared-content schemas, erasure jobs, and retention behavior are finalized.
-- **Approval status:** Pending user decision.
+- **Approval status:** Revised policy recorded; implementation privacy choices unresolved.
+- **Effect:** Only necessary contribution audit history is preserved with pseudonymized attribution. Shared text, notes and photos require an explicit removal/retention/export process; indefinite retention is no longer a default. Minimal fields, pseudonymization, audience, timing and derived-copy cleanup remain unresolved.
+- **Implementation gate:** Resolve the applicable [P01–P09 privacy choices](D01_D03_RESOLUTION.md) before archive/retention/export/erasure implementation; no fallback policy is selected.
 
 ### D04 — Retention and offline access limits
 
@@ -190,11 +174,11 @@ Prepared 28 October 2026. **All decisions remain pending user approval.** Titles
 
 ## Recommended next task
 
-Ask the user to approve or revise D01–D11 explicitly. Prioritize D01/D02/D03/D04/D05/D06/D08/D09/D10 because they shape core identity, ownership, ledger, and lifecycle choices. D07 and D11 may be deferred only while Storage and recurrence implementation remain out of scope.
+D01–D03 have been addressed at the product-policy level as recorded above. Resolve P01–P09 before the affected privacy implementation; D04–D11 remain pending and are outside CP-003B Part 1. Do not treat visual approval, this record, or prior recommendations as approval of those remaining decisions.
 
 After approval, CP-003 should start with pure domain identity/scope/revision/Money values and focused tests, then the approved persistence/security feasibility work in an isolated development environment. Database migrations and real authentication require explicit implementation authorization; they are not started by this review. Prove membership isolation, concurrent invite acceptance, idempotency, exact money, and revocation before product modules. No live Supabase project or paid dependency is needed for this review.
 
-## Completed verification
+## Historical baseline verification (before CP-003B)
 
 - `flutter analyze`: passed, no issues found.
 - `flutter test`: all six original tests passed.
@@ -207,3 +191,7 @@ After approval, CP-003 should start with pure domain identity/scope/revision/Mon
 - Disk at initial review: approximately 42 GiB free. Native builds were not repeated for this version-control/documentation task; previous native build results are historical evidence only.
 
 This review is included in the local baseline commit named `chore: establish Twogethera foundation and architecture`. Obtain its identifier with `git log -1 --format=%H`. No remote, push, database migration, Supabase configuration, or authentication implementation is part of this task.
+
+## Part 2 recommendation package — awaiting approval
+
+[FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md) reviews all nine open privacy choices and D04–D11, with specific recommended wording, risks, dependencies, disclosures and pending approval states. It is an advisory candidate, not an amendment to recorded approvals or authorization to implement a backend. Earlier proposals and history above remain unchanged; reconcile designs only after explicit user approval.

@@ -1,5 +1,7 @@
 # Privacy and authorization model
 
+**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for final proposed wording, status, tests, disclosures and implementation gates. D01/D02 approvals and D03’s recorded revision are preserved. Technical endorsement is pending formal approval; P03/P04/P09 product choices remain unresolved. No backend implementation is authorized.
+
 **Specification, not deployed policies.** See [approval decisions](README.md), especially archive access (D02), retained shared records (D03), offline lease (D04), and non-E2EE storage (D08).
 
 ## Trust boundaries and authorization predicates
@@ -9,12 +11,13 @@ Supabase Auth establishes identity. PostgreSQL establishes current authorization
 Define these conceptual predicates with `auth.uid()` as the principal, not a caller-supplied user ID:
 
 - `eligible_user()`: authenticated user has `app_users.state = active`; identity exists, session/device is not rejected for privileged commands.
-- `can_read_space(c)`: eligible user has an active membership in draft/paired c, or an archived membership in archived c. No reads in purging. A revoked membership never qualifies.
+- `can_read_space(c)`: eligible user has current active membership in draft/paired c; an archive entitlement requires the original remaining user, concrete reviewed policy/deadlines and no revocation; missing P03/P09 approval/configuration fails closed for archive activation. No reads in purging; revoked membership never qualifies. An archive label is not a content grant.
+- `can_read_record(c, type, id)`: requires can_read_space plus current content classification, permitted field projection, live parent, no ordinary-delete/privacy block and unexpired class-specific deadline. Survivor-only content is not automatically removed on the other account's deletion. Mixed/uncertain units follow a scoped hold/review; account deletion never grants unrestricted read/export. P03/P04/P09 unresolved values block the affected implementation, not an allow-all fallback.
 - `can_write_space(c)`: eligible user has active membership and c is paired. Parent row must also be live and the command's specific checks must pass.
 - `can_manage_draft(c)`: eligible user is the sole active member of a draft; only invitation and draft management, no shared planner edits.
 - `owns_personal_row(u)`: eligible user and u equals `auth.uid()`; private scope constraints apply additionally if a personal preference references a couple.
 
-Authorization epoch is an invalidation marker; matching an epoch is **not** a substitute for checking membership. Writes recheck after taking transaction locks. RLS evaluates reads against the request's database snapshot; a read already in flight before revocation may finish. Revocation cannot recall bytes already delivered.
+Authorization epoch invalidates access context; privacy epoch invalidates content representations, snapshots and export sessions. Both are server-owned; matching epochs are **not** substitutes for live membership/content checks. Writes recheck after taking transaction locks. RLS evaluates reads against the request's database snapshot; a read already in flight before revocation may finish. Revocation cannot recall bytes already delivered.
 
 ## Exposure, grants, and RLS specification
 
@@ -25,9 +28,9 @@ Enable RLS on all application and operational tables; apply FORCE RLS where appr
 | profiles and personal preferences | Own user only; couple-context preferences also require `can_read_space` | No direct DML; typed commands derive user and enforce allowlisted editable fields/revision |
 | couple_spaces | `can_read_space(id)` | Only create/rename/link/unlink/lifecycle commands; clients cannot set state/count/epoch |
 | memberships | `can_read_space(couple_id)` exposes only member card/seat/state; caller's own revoked-state discovery through `account_context()` | No direct DML; no role promotion, user substitution, seat reassignment, or resurrection |
-| bucket/date/plan/memory/category entities | `can_read_space(couple_id)` AND live row/root (no tombstone or deletion_started_at), including live owning parent for child rows | No direct DML; commands enforce `can_write_space`, live parents, expected revision, and old/new scope immutability |
-| savings goals/contributions | Same scope read; goals have archive status, contributions retained for audit | Ledger insert only through dedicated money commands; no ledger update/delete grants or edit RPC |
-| photo metadata | Same scope read, live memory/attachment; only safe metadata fields | Reservation/caption/remove/finalize commands; clean object metadata server-owned |
+| bucket/date/plan/memory/category entities | `can_read_record(couple_id,type,id)` AND live row/root (no tombstone or deletion_started_at), including live owning parent for child rows | No direct DML; paired commands check live parents/revision/immutable scope. Separately guarded ordinary restore requires approved P04, paired state, recovery deadline and no privacy block; archive privacy removal never grants ordinary edit permission |
+| savings goals/contributions | Current scope plus record-level policy; after deletion only the necessary pseudonymized audit field projection defined by P01–P03/P09, not full contribution rows | Proposed monetary insert commands only; no ordinary ledger edits/deletes. A separate privileged privacy-redaction workflow must handle nonessential notes/identifiers under D03 |
+| photo metadata | Current scope plus D03/P05 record eligibility, live memory/attachment; only permitted metadata fields | Reservation/caption/remove/finalize commands; clean object metadata server-owned |
 | activity_events | Same scope; no secret/content payload; retention applies | Server-generated append-only; client cannot impersonate actor or append arbitrary events |
 | invitations / app_users / security audits / lifecycle jobs | No direct access; narrow authenticated own-state/inviter-summary RPCs only | Internal transactions/jobs; token hashes never returned |
 | devices | Own safe metadata projection only, no auth credentials | Online register/rename/revoke commands; requires authenticated user and validated device ownership |
@@ -38,7 +41,7 @@ Enable RLS on all application and operational tables; apply FORCE RLS where appr
 
 For any future invoker-DML API, INSERT requires `WITH CHECK` for current scope and owner; UPDATE requires both old-row `USING` and new-row `WITH CHECK`, plus immutable-field column restrictions/triggers. This blueprint deliberately provides no client DML grant, so those future policies must not be silently introduced. Scope IDs and authorship cannot be changed even between two spaces the same user can read. A privileged command is not made safe merely by having table RLS.
 
-Use composite tenant FKs and server-side parent existence/liveness validation to prevent attaching an item, task, memory, or photo to someone else's row. Uniqueness/existence errors must be mapped to generic external outcomes where they could reveal another couple's records. Search, aggregates, calendars, exports, and pagination all use the same scope predicates; no unfiltered privileged global search.
+Use composite tenant FKs and server-side parent existence/liveness validation to prevent attaching an item, task, memory, or photo to someone else's row. Uniqueness/existence errors must be mapped to generic external outcomes where they could reveal another couple's records. Search, aggregates, calendars, exports, and pagination all use scope AND per-content eligibility/redaction predicates; no unfiltered privileged global search.
 
 ## Membership helpers, views, and RPCs
 
@@ -57,10 +60,12 @@ Use a **private** bucket. Object authorization is independent of database row au
 - Server reservation assigns immutable `staging/<couple UUID>/<attachment UUID>/<random UUID>` and a future clean key. Clients cannot choose another scope, overwrite a ready object, upsert, copy/move, or list unrestricted objects.
 - Authenticated INSERT permits exactly the live reservation's staging path, uploader identity, unexpired reservation, live memory, and `can_write_space`. Filename, client MIME, owner metadata, and file extension are not trusted. No client UPDATE/DELETE object grants.
 - Staging bytes are not client-downloadable. A trusted processor validates size, decoded image format/dimensions, removes EXIF/GPS, re-encodes to an allowed image format, calculates canonical checksum, and writes clean bytes. It then rechecks membership/epoch, parent liveness, and reservation state under the scope lock before publishing ready metadata. Storage and SQL are not an atomic transaction: failure leaves inaccessible staged/orphaned objects for cleanup.
-- SELECT/download permits only clean key exactly referenced by live ready metadata with live memory and `can_read_space`; it also denies attachments whose uploader account is deleting/disabled for erasure, before background tombstoning finishes. Keep the uploader linkage until this cleanup is complete. Storage listings cannot return rows outside that predicate. Thumbnails/derivatives require the same checks; no public CDN URL or public transform endpoint.
+- SELECT/download permits only a clean key referenced by live ready metadata with live memory, current scope entitlement and approved D03/P05 record eligibility. Uploader-account-only access is insufficient: apply origin/contributor classification, pending verified privacy hold, archive deadline and depicted-person requests under revised P03/P05. Account deletion cannot blanket-hide survivor-only media. Do not retain identifying uploader links indefinitely as a cleanup shortcut. Storage listings cannot return rows outside that predicate. Thumbnails/derivatives require the same checks; no public CDN URL or public transform endpoint.
 - Use authenticated downloads, not signed bearer download URLs initially (D07). Signed URLs are a distinct private delivery option documented under [asset delivery](https://supabase.com/docs/guides/storage/serving/downloads); they are deliberately excluded because a delivered bearer URL can outlive membership changes.
-- Removal first tombstones metadata and removes read permission; an idempotent server job deletes bytes through the Storage API and checks orphan cleanup. Do not delete `storage.objects` rows manually as a substitute for object deletion.
+- Photo/privacy removal first blocks metadata and removes read permission; ordinary text recovery is a separate P04 workflow and never restores privacy-removed bytes; an idempotent server job deletes bytes through the Storage API and checks orphan cleanup. Do not delete `storage.objects` rows manually as a substitute for object deletion.
 - Images, export files, thumbnails, and HTTP responses use private/no-store cache behavior where controllable; do not service-worker-cache sensitive responses. Validate actual CDN/cache headers and old URL behavior in integration tests. Device-cached photos follow the local access lease and wipe procedure.
+
+D02's approved immediate server-access revocation constrains any later D07 delivery choice: a previously issued URL/token must not silently authorize new former-scope server downloads after revocation. Link/cache invalidation and any delivery mechanism must be resolved under P08/D07; do not assume an unexpired bearer URL is revocable. This differs from already downloaded bytes, which cannot be reliably remotely erased.
 
 ## Realtime and notifications
 
@@ -81,3 +86,15 @@ The dispatcher uses current authorization when choosing recipients; missed/dupli
 ## Required security acceptance tests (future, not run in CP-002)
 
 Use two unrelated couples, an unlinked account, an archived reader, a revoked member with an old JWT, and anon. Exercise every table/read projection/RPC/Storage object/channel with other-scope IDs. Test insert/check bypass, changing scope/actor, parent mismatch, guessed IDs, deleted parents, stale revisions, hidden fields, direct function calls, malicious search_path, double invite redemption, third-member attempts, and session/account deletion races. Confirm no unauthorized bytes through object URLs, thumbnails, export jobs, errors, views, or subscriptions. Catalog tests must fail if a new exposed table lacks RLS or a function has unintended EXECUTE grants. Passing Flutter widget tests does not validate this model.
+
+## Reconciled privacy, recovery and export perimeter
+
+All paths (RLS, views, RPCs, counts/search, Storage/transform/range downloads, snapshots, receipts and exports) use the same per-record eligibility and permitted field allowlist. Private provenance/recovery/mapping/review records have no general client table access. Helpers cannot accept a caller-supplied principal or elevate an archived reader into a paired writer. Separate origin ownership from subject privacy: valid removal wins, but unrelated survivor-only records remain eligible under bounded archive policy.
+
+An ordinary text restore is a narrow revision-checked command, not clearing deleted_at through a normal edit. It locks and checks current paired membership, privacy generation, parent and child eligibility, original expiry and recoverable_until. A concurrent privacy request/expiry/revocation wins; stale offline payloads, recovery, exports and backups cannot restore protected content. Exact restore actors and duration remain P04 approval gates.
+
+Content changes invalidate affected exports. Privacy changes atomically increment privacy epoch, invalidate old page/snapshot/export tokens and deny old representations before cleanup workers run. An export's original 24-hour deadline cannot be extended by regeneration/revocation retries. Do not serve held mixed units or ordinary trash through a previously materialized ZIP. All monetary after-erasure surfaces use P01 fields and P02 aliases only; no full-row or identifying FK join.
+
+D08 applies to credentials as well as content: native protected key/DB/media/temporary-file handling is a prerequisite; initial sensitive web session state is memory-only with reviewed nonpersistent Auth-session behavior. No sensitive browser DB/outbox/search/media/Auth localStorage/IndexedDB/OPFS/service-worker persistence. Static approved UI assets and non-sensitive appearance are separate. No new Auth integration is implemented in this review.
+
+Required additional adversarial cases: survivor record preserved on partner deletion; departing/mixed fragments blocked without suppressing unrelated records; spoofed privacy claims and staff role overreach; restore-versus-privacy race; old-epoch pages/receipts/artifacts; deleted identity hidden from audit/provenance; browser storage inspection; backup restore with re-erasure before serving. See the consolidated specification for per-decision tests and remaining gates.

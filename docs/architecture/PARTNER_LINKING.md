@@ -1,10 +1,12 @@
 # Partner linking protocol
 
+**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for final proposed wording, status, tests, disclosures and implementation gates. D01/D02 approvals and D03’s recorded revision are preserved. Technical endorsement is pending formal approval; P03/P04/P09 product choices remain unresolved. No backend implementation is authorized.
+
 **Design only.** Approval assumptions: D01, D02, D06, D09, D10 in the [decision register](README.md). No invite endpoints, email sender, or authentication screen exists yet.
 
-## States and invariants
+## Approved boundaries and proposed states
 
-An account can have at most one `active` membership across all spaces. A new space starts `draft`, with the creator in seat 1. It becomes `paired` only when two distinct active users occupy seats 1 and 2. An archived/purging space has no active seats and cannot be reactivated or accept a new partner. Historical seat rows are never reused. Both active partners have equal shared-data rights; the creator has no permanent unilateral admin privilege over the other partner.
+D01 fixes at most one active couple space per account and at most two active members per space, with no reopening/replacement reuse of archives. The following draft/paired state machine and exact counts follow technically endorsed D09 pending formal approval; historical seat representation is a reviewed implementation detail; archive content/read eligibility is conditional under D02/D03 and P03. An account can have at most one `active` membership across all spaces. A new space starts `draft`, with the creator in seat 1. It becomes `paired` only when two distinct active users occupy seats 1 and 2. An archived/purging space has no active seats and cannot be reactivated or accept a new partner. Historical seat rows are never reused. Both active partners have equal shared-data rights; the creator has no permanent unilateral admin privilege over the other partner.
 
 ```mermaid
 stateDiagram-v2
@@ -13,7 +15,7 @@ stateDiagram-v2
     Draft --> Paired: atomic accept_invitation
     Draft --> Purging: sole member abandons draft
     Paired --> Archived: either member leaves / account becomes deleting
-    Archived --> Purging: archived reader requests deletion or no reader remains
+    Archived --> Purging: only under resolved D03 retention / final-purge rules
     Purging --> [*]: privileged cleanup completes
 ```
 
@@ -71,8 +73,8 @@ sequenceDiagram
 
 ## Leaving, deletion, and recovery
 
-Unlink requires recent authentication, an explicit warning, and an online operation. Either member may leave without partner approval. In one transaction: revoke leaver, convert remaining active member to archived, archive the space, increment epoch, revoke invites, update revisions, publish both users' access events, and write a receipt. There are no active seats afterward. A stale offline contribution arriving later is denied and never redirected to the user's new couple. Data export is offered before leaving but is not a prerequisite that can block safe exit.
+D02 approves either partner leaving independently, with immediate loss of former-scope server access for the departing partner. The proposed online transaction locks/revokes the leaver, stops future former-scope reads/writes/media/exports, invalidates epoch/invites and emits safe access changes. The remaining partner may receive a read-only archive only under resolved D03 eligibility/retention rules; changing a membership state to archived is not permission to retain/read all content. Revised P03/P04/P09 block final archive grants; technically endorsed P05 still needs verified safeguards. Preserve eligible separable survivor content; account deletion is not blanket destruction of all nonfinancial records. Stale offline writes must fail rather than move into a new couple. Any export opportunity depends on P06 and cannot delay safe exit. Already downloaded/in-flight bytes cannot be reliably recalled; cooperative cache cleanup is not remote erasure.
 
-Account deletion immediately marks the account deleting and performs the same unlink transition, disables tokens, and queues private-data/media cleanup. Cancellation does not restore a former membership. The remaining archived reader can form a new space; their new partner receives no archive access. The archived reader may leave/delete the archive, making it purging. See [data lifecycle](DATA_LIFECYCLE.md) for retention/erasure proposals.
+Technically endorsed P07/D10 provide immediate account denial and 30-day private-only recovery pending formal approval; cancellation never restores membership/archive or resets shared clocks. Revised P03 classification and P09 necessity/horizon remain unresolved. Apply account-state checks independently of old JWT validity; no backend saga is implemented. D01 forbids archived-space reuse with a replacement partner, and a new partner receives no historical access. Archive deletion/last-reader departure does not silently determine the audit-history purge policy. See [data lifecycle](DATA_LIFECYCLE.md) for the required removal/retention/export process and open gates.
 
 Lost-invite recovery is regenerate/revoke, not recover stored plaintext. Account recovery uses real Auth identity verification and must not grant partner access by answering relationship questions. An accept/create/unlink network timeout is resolved by operation status/current account context; never infer success from a local UI state.
