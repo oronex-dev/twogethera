@@ -1,0 +1,22 @@
+[
+  {
+    "version": "20261029000100",
+    "path": "supabase/migrations/20261029000100_bootstrap.sql",
+    "sha256": "7fd1bbc7357abbd7b20d22e23b64329eba7e46938b279e5c38fc5c2476066913"
+  },
+  {
+    "version": "20261029000200",
+    "path": "supabase/migrations/20261029000200_kernel.sql",
+    "sha256": "2ddb185afc89dc8d043374dc667dc37ddbb01c05d746e866729e23dca14e7a5a"
+  },
+  {
+    "version": "20261029000300",
+    "path": "supabase/migrations/20261029000300_default_execution.sql",
+    "sha256": "e214015b34376a03efd7d7d16380f5a0b6bcbeb3415cf43d6a33aeb48a02878b"
+  },
+  {
+    "version": "20261030000400",
+    "path": "supabase/migrations/20261030000400_operations.sql",
+    "sha256": "2534dddc78dab3d8ca4a15f5bdb5da5705cffc0d8c89bd3f1a1cd5319eacde52"
+  }
+]

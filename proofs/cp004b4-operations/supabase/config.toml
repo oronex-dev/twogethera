@@ -1,0 +1,50 @@
+# CP-004B.4 disposable local proof only. Never use as production configuration.
+project_id = "twogethera-b4"
+[api]
+enabled = true
+port = 58321
+# Bootstrap with existing empty public namespace; runner narrows PostgREST to cp004b2 after guarded install.
+schemas = ["public"]
+extra_search_path = []
+max_rows = 100
+[db]
+port = 58322
+shadow_port = 58320
+major_version = 17
+[db.migrations]
+# Installed only by the sentinel-checked HTTP proof runner, never by root migrations.
+enabled = false
+[db.seed]
+enabled = false
+[studio]
+enabled = false
+[local_smtp]
+enabled = true
+port = 58324
+[storage]
+enabled = false
+[realtime]
+enabled = false
+[analytics]
+enabled = false
+[edge_runtime]
+enabled = false
+[auth]
+enabled = true
+signing_keys_path = "./.local/signing_keys.json"
+site_url = "http://127.0.0.1:58321"
+additional_redirect_urls = []
+jwt_expiry = 600
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 16
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true
+max_frequency = "1s"
+[auth.rate_limit]
+email_sent = 100
+sign_in_sign_ups = 1000
+# Elevated local synthetic-test limits only; not approved production defaults.
