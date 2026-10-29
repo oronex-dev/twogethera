@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,11 +7,35 @@ import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/design_studio/presentation/design_studio_screen.dart';
 import '../../shared/widgets/adaptive_shell.dart';
+import '../../features/authentication/application/auth_controller.dart';
+import '../../features/authentication/presentation/local_auth_screen.dart';
 import '../../shared/widgets/responsive_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
+  final refresh = ValueNotifier(0);
+  ref.listen(authControllerProvider, (_, _) => refresh.value++);
+  ref.onDispose(refresh.dispose);
   final router = GoRouter(
+    refreshListenable: refresh,
+    redirect: (context, route) {
+      if (!kDebugMode) return null;
+      final authenticated =
+          ref.read(authControllerProvider).phase == AuthPhase.authenticated;
+      if (route.uri.path == '/account' && !authenticated) return '/auth/local';
+      if (route.uri.path == '/auth/local' && authenticated) return '/account';
+      return null;
+    },
     routes: [
+      if (kDebugMode) ...[
+        GoRoute(
+          path: '/auth/local',
+          builder: (context, state) => const LocalAuthScreen(),
+        ),
+        GoRoute(
+          path: '/account',
+          builder: (context, state) => const LocalAccountScreen(),
+        ),
+      ],
       ShellRoute(
         builder: (context, state, child) =>
             AdaptiveShell(path: state.uri.path, child: child),

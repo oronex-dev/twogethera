@@ -7,9 +7,14 @@ class AppConfig {
   const AppConfig({required this.environment});
 
   factory AppConfig.fromEnvironment() => AppConfig(
-    environment: AppEnvironment.values.byName(
-      const String.fromEnvironment('APP_ENV', defaultValue: 'development'),
-    ),
+    environment: switch (const String.fromEnvironment(
+      'APP_ENV',
+      defaultValue: 'development',
+    )) {
+      'development' => AppEnvironment.development,
+      'staging' => AppEnvironment.staging,
+      _ => AppEnvironment.production,
+    },
   );
 
   final AppEnvironment environment;

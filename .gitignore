@@ -90,3 +90,7 @@ app.*.map.json
 *.ipa
 *.dSYM/
 *.xcarchive/
+
+# CP-005A local public config and synthetic integration fixtures
+/.local/
+/test/cp005a_live_test.dart

@@ -12,7 +12,6 @@ void bootstrap() {
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
     FlutterError.onError = (details) {
-      FlutterError.presentError(details);
       AppErrorHandler.report(
         details.exception,
         details.stack ?? StackTrace.current,

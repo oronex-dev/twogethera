@@ -4,4 +4,6 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Debug-only loopback exceptions; release transport policy is unchanged. -->
+    <application android:networkSecurityConfig="@xml/local_auth_network_security" />
 </manifest>

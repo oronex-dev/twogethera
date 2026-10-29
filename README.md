@@ -1,6 +1,6 @@
 # Twogethera · CP-001
 
-A premium, private couples planner for Android, iOS, and responsive web. This milestone establishes the application foundation only. The screen describes the future product; it does not store information, authenticate users, or connect partners.
+A premium, private couples planner for Android, iOS, and responsive web. The approved screens remain public visual previews. CP-005A adds a debug-only, local, memory-only authentication proof at `/#/auth/local` and a protected account-context screen; it does not enable production authentication, planner data or partner linking.
 
 ## Toolchain and setup
 
@@ -128,3 +128,8 @@ See [visual system](docs/design/VISUAL_SYSTEM.md), [preview gallery](docs/design
 ## CP-003B · D01–D03 resolution
 
 D01 is approved; D02 is approved with safeguards; D03 records a revised minimal-audit-history policy with implementation-level privacy choices unresolved. D04–D11 remain pending. See [decision record and open P01–P09](docs/architecture/D01_D03_RESOLUTION.md) and [current approval register](docs/architecture/APPROVAL_REVIEW.md). Earlier milestone reports/design documentation describe their historical approval state; the current architecture register takes precedence for product-policy status. CP-003B Part 1 is documentation only and preserves the approved visual design.
+
+
+## CP-005A local authentication foundation
+
+See [docs/CP-005A.md](docs/CP-005A.md) for current architecture, test evidence, limitations and local preview commands. Historical milestone sections above retain their original scope statements. The new proof uses the pure Dart Supabase client with explicit memory-only PKCE storage, an explicitly accepted in-memory session, disabled refresh and a private account-context adapter. No hosted project, persistent login, registration/recovery UI or shared-data implementation is enabled. Local development controls/routes are absent from release builds.
