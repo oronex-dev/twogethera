@@ -1,0 +1,5 @@
+.temp/
+.branches/
+.env*
+*.log
+.local/
