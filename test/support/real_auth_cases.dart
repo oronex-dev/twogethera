@@ -125,6 +125,11 @@ void registerRealAuthTests() {
       });
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('account-verified')), findsOneWidget);
+      if (fixture['native'] == true) {
+        // Audit while the installed application still owns a live session;
+        // Flutter's native test cleanup can uninstall it after the suite exits.
+        await tester.runAsync(() => control('audit'));
+      }
       final fresh = SupabaseAuthRepository(createClients: clients);
       await tester.runAsync(() async {
         var denied = false;
@@ -176,6 +181,68 @@ void registerRealAuthTests() {
     }
     expect(safe, isTrue);
   });
+
+  testWidgets(
+    'HTTP: UI renders while a controlled endpoint delays then fails',
+    (tester) async {
+      // This test uses a real delayed HTTP 503, not Supabase authorization evidence.
+      final repository = SupabaseAuthRepository(
+        createClients: () => LocalAuthClients(
+          url: fixture['unavailableUrl'] as String,
+          publicKey: fixture['nonce'] as String,
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(repository),
+          localAuthConfigProvider.overrideWithValue(
+            LocalAuthConfig(
+              endpoint: Uri.parse(fixture['url'] as String),
+              publicKey: fixture['key'] as String,
+            ),
+          ),
+        ],
+      );
+      try {
+        container.read(appRouterProvider).go('/auth/local');
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TwogetheraApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.runAsync(() async {
+          final pending = container
+              .read(authControllerProvider.notifier)
+              .signIn(
+                fixture['email'] as String,
+                fixture['password'] as String,
+              );
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          expect(
+            container.read(authControllerProvider).phase,
+            AuthPhase.loading,
+          );
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(find.byType(LinearProgressIndicator), findsOneWidget);
+          expect(find.text('Checking local access…'), findsOneWidget);
+          await pending;
+        });
+        await tester.pumpAndSettle();
+        expect(
+          container.read(authControllerProvider).problem,
+          AuthProblem.unavailable,
+        );
+        expect(container.read(authControllerProvider).context, isNull);
+        expect(find.text('Sign in locally'), findsOneWidget);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        container.dispose();
+        await tester.runAsync(repository.dispose);
+      }
+    },
+  );
 
   test('REAL: genuine short-lived Auth JWT expires without refresh; adapter and server deny it', () async {
     LocalAuthClients? active;
