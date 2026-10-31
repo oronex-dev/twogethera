@@ -94,3 +94,4 @@ app.*.map.json
 # CP-005A local public config and synthetic integration fixtures
 /.local/
 /test/cp005a_live_test.dart
+/test/cp005b2_live_test.dart

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """CP-005A local fixture orchestration. Never passes admin credentials to Flutter.
-Usage: python3 tool/run_local_auth_tests.py chrome | <iOS simulator ID> | emulator-<port> [--restart-only] [--adb-reverse]
+Usage: python3 tool/run_local_auth_tests.py chrome | <iOS simulator ID> | emulator-<port> [--restart-only] [--adb-reverse] [--lifecycle] [--functional-only]
 """
 import re
 import time
 import http.server
+import html
 import json
 import os
 from pathlib import Path
@@ -191,7 +192,9 @@ def main():
     flags=set(sys.argv[2:])
     restart_only='--restart-only' in flags
     adb_reverse='--adb-reverse' in flags
-    require(len(flags)==len(sys.argv[2:]) and flags<= {'--restart-only','--adb-reverse'} and not (restart_only and target=='chrome'),
+    lifecycle='--lifecycle' in flags
+    functional_only='--functional-only' in flags
+    require(len(flags)==len(sys.argv[2:]) and flags<= {'--restart-only','--adb-reverse','--lifecycle','--functional-only'} and not (restart_only and target=='chrome') and not (restart_only and lifecycle) and (not functional_only or (lifecycle and target!='chrome')),
             'Unsupported test selection')
     android=bool(re.fullmatch(r'emulator-[0-9]+',target))
     require(not adb_reverse or android,'ADB reverse requires a local Android emulator')
@@ -200,6 +203,11 @@ def main():
         adb=Path.home()/'Library/Android/sdk/platform-tools/adb'
         state=proc([str(adb),'-s',target,'shell','getprop','ro.kernel.qemu'])
         require(state.returncode==0 and state.stdout.strip()=='1','Local Android emulator required')
+        try:
+            ready=subprocess.run([str(adb),'-s',target,'shell','am','get-current-user'],capture_output=True,text=True,timeout=10)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('Android activity service unresponsive (10s); no authentication tests started')
+        require(ready.returncode==0 and ready.stdout.strip()=='0','Android primary-user activity service is not ready')
     started=time.monotonic()
     print('Checking local backend preflight (no credentials printed).',flush=True)
     try:p.preflight()
@@ -214,6 +222,17 @@ def main():
     code,user,_=p.fixture_auth('/admin/users',{'email':email,'password':password,'email_confirm':True})
     require(code==200 and user.get('id'),'B.4 synthetic fixture setup failed')
     fixture_id=user['id']
+    lifecycle_values={}
+    reset_id=None
+    if lifecycle:
+        lifecycle_values={'signupEmail':'cp005b2-signup-'+run+'@example.invalid',
+            'expiredEmail':'cp005b2-expired-'+run+'@example.invalid',
+            'resetEmail':'cp005b2-reset-'+run+'@example.invalid',
+            'unknownEmail':'cp005b2-absent-'+run+'@example.invalid',
+            'newPassword':secrets.token_urlsafe(30)}
+        code,reset_user,_=p.fixture_auth('/admin/users',{'email':lifecycle_values['resetEmail'],'password':password,'email_confirm':True})
+        require(code==200 and reset_user.get('id'),'Recovery synthetic fixture failed')
+        reset_id=reset_user['id']
     # B.1 is used only for a genuine short-lived (60s) Auth token expiry case.
     state=proc(['supabase','status','--workdir',str(ROOT/'proofs/cp004b1-http'),'-o','json'])
     require(state.returncode==0,'B.1 short-lived local Auth stack unavailable')
@@ -229,6 +248,7 @@ def main():
     require(code==200,'Short-lived Auth fixture setup failed')
     nonce=secrets.token_urlsafe(32)
     restart_state={'phase':'first','ready':threading.Event(),'passed':False}
+    returned_links=set()
 
     class Control(http.server.BaseHTTPRequestHandler):
         def log_message(self,*args):pass
@@ -246,6 +266,43 @@ def main():
             print('Test broker CORS requested header names: '+self.headers.get('Access-Control-Request-Headers',''),flush=True)
             self.send_response(204);self.headers_for();self.end_headers()
         def do_POST(self):
+            if self.headers.get('X-Local-Proof')==nonce and lifecycle and self.path in ('/functions/v1/mail','/functions/v1/expire-signup','/functions/v1/expire-recovery'):
+                try:
+                    length=int(self.headers.get('Content-Length','0'));require(0<=length<=1024,'Invalid mail control body')
+                    body=json.loads(self.rfile.read(length)) if length else {}
+                    if self.path.endswith('/mail'):
+                        kind=body.get('kind');require(kind in ('signup','expired','recovery'),'Unrecognized fixed mailbox')
+                        email=lifecycle_values[{'signup':'signupEmail','expired':'expiredEmail','recovery':'resetEmail'}[kind]]
+                        deadline=time.monotonic()+15;link=None
+                        while time.monotonic()<deadline and link is None:
+                            status,messages,_=m['local_http']('http://127.0.0.1:58324/api/v1/messages')
+                            require(status==200 and isinstance(messages,dict),'Local captured mailbox unavailable')
+                            for message in messages.get('messages',[]):
+                                if email not in json.dumps(message):continue
+                                mid=message.get('ID') or message.get('id')
+                                status,content,_=m['local_http']('http://127.0.0.1:58324/api/v1/message/'+urllib.parse.quote(mid))
+                                require(status==200,'Captured message unavailable')
+                                text=html.unescape(str(content.get('Text',''))+' '+str(content.get('HTML','')))
+                                found=re.search(r'http://127\.0\.0\.1:58321/auth/v1/verify\?[^\s"<>]+',text)
+                                if found and found.group(0) not in returned_links:link=found.group(0);break
+                            if link is None:time.sleep(.2)
+                        require(link,'No genuine development email link captured')
+                        returned_links.add(link)
+                        secrets_to_redact.append(link)
+                        secrets_to_redact.extend(urllib.parse.parse_qs(urllib.parse.urlsplit(link).query).get('token',[]))
+                        result={'link':link}
+                    else:
+                        # Age only a fixed synthetic fixture timestamp; token is
+                        # genuinely issued and Auth performs the expiry check.
+                        if self.path.endswith('/expire-signup'):
+                            changed=sql("WITH aged AS (UPDATE auth.users SET confirmation_sent_at=clock_timestamp()-interval '2 hours' WHERE email="+quote(lifecycle_values['expiredEmail'])+" AND confirmation_token<>'' AND confirmation_sent_at>clock_timestamp()-interval '1 minute' RETURNING 1) SELECT count(*) FROM aged")
+                        else:
+                            changed=sql("WITH aged AS (UPDATE auth.users SET recovery_sent_at=clock_timestamp()-interval '2 hours' WHERE id="+quote(reset_id)+" AND recovery_token<>'' AND recovery_sent_at>clock_timestamp()-interval '1 minute' RETURNING 1) SELECT count(*) FROM aged")
+                        require(changed=='1','Expiry fixture must have a newly issued unconsumed token')
+                        result={'ok':True}
+                    self.send_response(200);self.headers_for();self.end_headers();self.wfile.write(json.dumps(result).encode());return
+                except Exception:
+                    self.send_response(500);self.end_headers();return
             if self.path=='/auth/v1/token?grant_type=password' and self.headers.get('apikey')==nonce:
                 # Controlled real HTTP failure, solely to measure UI responsiveness.
                 time.sleep(2)
@@ -280,7 +337,16 @@ def main():
                 # Fixed fixture only: no arbitrary user IDs, SQL or scripts accepted.
                 if self.path=='/functions/v1/audit':
                     require(target!='chrome','Native audit requires native target')
-                    audit_native_storage(target,secrets_to_redact)
+                    length=int(self.headers.get('Content-Length','0'))
+                    require(0<=length<=16384,'Oversized live audit body')
+                    body=json.loads(self.rfile.read(length)) if length else {}
+                    live=None
+                    if lifecycle and body:
+                        require(set(body)=={'accessToken','refreshToken'},'Invalid live audit fields')
+                        live=[body['accessToken'],body['refreshToken']]
+                        require(all(isinstance(value,str) and 0<len(value)<=8192 for value in live),'Invalid live audit values')
+                        secrets_to_redact.extend(live)
+                    audit_native_storage(target,secrets_to_redact,live)
                 else:
                     enabled='true' if self.path=='/functions/v1/restore' else 'false'
                     sql('BEGIN; SET LOCAL ROLE cp004b4_maintainer; SELECT cp004b4_ops.set_account_enabled('+quote(fixture_id)+','+enabled+'); RESET ROLE; COMMIT;')
@@ -294,6 +360,7 @@ def main():
         'control':'http://127.0.0.1:'+str(server.server_port),'nonce':nonce,
         'unavailableUrl':'http://127.0.0.1:'+str(server.server_port),
         'expiryUrl':b1['API_URL'],'expiryKey':b1['ANON_KEY'],'expiryEmail':short_email,'expiryPassword':short_password}
+    fixture.update(lifecycle_values)
     if android and not adb_reverse:
         # Android emulator loopback is the guest; this alias reaches the Mac.
         for field in ('url','control','expiryUrl','unavailableUrl'):
@@ -306,12 +373,13 @@ def main():
     app_file=local/'app-defines.json';app_file.touch(mode=0o600);app_file.chmod(0o600)
     app_file.write_text(json.dumps({k:v for k,v in definitions.items() if k not in ('CP005A_FIXTURE','LOCAL_SUPABASE_URL')}))
     secrets_to_redact=[password,short_password,p.admin,b1['SERVICE_ROLE_KEY'],nonce,p.anon,b1['ANON_KEY']]
-    generated=ROOT/'test/cp005a_live_test.dart'
+    if lifecycle:secrets_to_redact.append(lifecycle_values['newPassword'])
+    generated=ROOT/('test/cp005b2_live_test.dart' if lifecycle else 'test/cp005a_live_test.dart')
     require(not generated.exists(),'Another local browser test entry already exists')
     if target=='chrome':
-        generated.write_text((ROOT/'test_local/browser_entry.dart').read_text().replace('../test/support/','support/'))
-        command=['flutter','test','--platform','chrome','test/cp005a_live_test.dart']
-    else:command=['flutter','test','integration_test/local_auth_test.dart','-d',target]
+        generated.write_text((ROOT/('test_local/lifecycle_browser_entry.dart' if lifecycle else 'test_local/browser_entry.dart')).read_text().replace('../test/support/','support/'))
+        command=['flutter','test','--platform','chrome',str(generated.relative_to(ROOT))]
+    else:command=['flutter','test','integration_test/lifecycle_test.dart' if lifecycle else 'integration_test/local_auth_test.dart','-d',target]
     command+=['--dart-define-from-file='+str(fixture_file),'--reporter','expanded']
     print('Running '+('native restart/storage proof only (functional suite NOT rerun)' if restart_only else 'real SDK/Flutter tests')+' against guarded local fixtures; credentials suppressed.',flush=True)
     reverse_created=[]
@@ -336,8 +404,10 @@ def main():
                 line=re.sub(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+','[redacted-jwt]',line)
                 print(line,end='',flush=True)
             code=child.wait()
-        if code==0 and target!='chrome':
+        if code==0 and target!='chrome' and not functional_only:
             native_restart_proof(target,fixture_file,fixture,secrets_to_redact,restart_state)
+        elif code==0 and functional_only:
+            print('Functional lifecycle suite only: native process/restart/storage proof NOT rerun.',flush=True)
     finally:
         for port in reversed(reverse_created):
             result=subprocess.run([str(adb),'-s',target,'reverse','--remove','tcp:'+str(port)],capture_output=True,text=True,timeout=10)
@@ -352,6 +422,17 @@ def main():
         try:b1m['http'](b1['API_URL']+'/auth/v1/admin/users/'+short_user['id'],'PUT',{'password':secrets.token_urlsafe(36)},
             {'apikey':b1['ANON_KEY'],'Authorization':'Bearer '+b1['SERVICE_ROLE_KEY']})
         except Exception:pass
+        if reset_id:
+            try:p.fixture_auth('/admin/users/'+reset_id,{'password':secrets.token_urlsafe(36)},'PUT')
+            except Exception:pass
+            try:sql('BEGIN; SET LOCAL ROLE cp004b4_maintainer; SELECT cp004b4_ops.set_account_enabled('+quote(reset_id)+',false); COMMIT;')
+            except Exception:pass
+        if lifecycle:
+            for key in ('signupEmail','expiredEmail'):
+                try:
+                    uid=sql('SELECT id FROM auth.users WHERE email='+quote(lifecycle_values[key]))
+                    if uid:p.fixture_auth('/admin/users/'+uid,{'password':secrets.token_urlsafe(36)},'PUT')
+                except Exception:pass
     require(code==0,'Local Flutter integration tests failed; see sanitized outcomes above')
     print('Local fixture secrets removed; public debug app configuration remains ignored.',flush=True)
 

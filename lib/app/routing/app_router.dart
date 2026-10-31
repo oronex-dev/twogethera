@@ -19,14 +19,34 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     redirect: (context, route) {
       if (!kDebugMode) return null;
-      final authenticated =
-          ref.read(authControllerProvider).phase == AuthPhase.authenticated;
+      final phase = ref.read(authControllerProvider).phase;
+      final authenticated = phase == AuthPhase.authenticated;
+      if (phase == AuthPhase.recovering &&
+          (route.uri.path == '/account' || route.uri.path == '/auth/local')) {
+        return '/auth/recovery';
+      }
       if (route.uri.path == '/account' && !authenticated) return '/auth/local';
-      if (route.uri.path == '/auth/local' && authenticated) return '/account';
+      if (route.uri.path.startsWith('/auth/') && authenticated) {
+        return '/account';
+      }
       return null;
     },
     routes: [
       if (kDebugMode) ...[
+        GoRoute(
+          path: '/auth/register',
+          builder: (context, state) =>
+              const LocalLifecycleScreen(registration: true),
+        ),
+        GoRoute(
+          path: '/auth/verify',
+          builder: (context, state) => const LocalLifecycleScreen(),
+        ),
+        GoRoute(
+          path: '/auth/recovery',
+          builder: (context, state) =>
+              const LocalLifecycleScreen(recovery: true),
+        ),
         GoRoute(
           path: '/auth/local',
           builder: (context, state) => const LocalAuthScreen(),
