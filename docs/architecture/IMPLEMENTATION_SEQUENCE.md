@@ -1,6 +1,10 @@
 # Implementation sequence, approval gates, and verification
 
-**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for final proposed wording, status, tests, disclosures and implementation gates. D01/D02 approvals and D03’s recorded revision are preserved. Technical endorsement is pending formal approval; P03/P04/P09 product choices remain unresolved. No backend implementation is authorized.
+**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for wording, status, tests, disclosures and implementation gates. D01/D02/D06/D09 are approved; D03’s recorded revision and unresolved P03/P04/P09 choices are preserved. Other technical directions remain pending formal approval. No backend implementation is authorized by this documentation update.
+
+## Current CP-006 readiness
+
+See [CP-006 readiness and implementation plan](../CP-006.md). D06 and D09 policy decisions are formally approved, so a bounded partner-linking implementation can be planned without re-approval of those policies. The CP-004 proofs are references only. In particular, CP-004A's draft-record read behavior must not be copied; unpaired planner data is now expressly denied. P03/P04/P09 continue to block archived-content, ordinary-recovery and audit-retention surfaces. This document update does not itself authorize implementation.
 
 **CP-002 stops at this blueprint.** No migration, Auth screen, backend connection, product module, or speculative Dart contract class has been implemented. All tests below described as future gates are requirements, not claims that a backend exists or was tested.
 
@@ -23,7 +27,7 @@ Project root: `/Users/fielmark.oronos/Developer/twogethera`. Inspected README, f
 
 Shell commands are invoked through `rtk proxy` per the user's RTK instructions. No Git initialization, commit, remote creation, or push occurred. If version control is desired, explicitly authorize local Git initialization and review a baseline before continuing; CP-002 does not infer that authorization from the conditional commit instruction.
 
-## Current recommended CP-004 sequence — explicit authorization required
+## Historical CP-004 recommendation from CP-003B
 
 The Flutter foundation and approved CP-003A UI remain unchanged. [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) supersedes earlier implementation recommendations and defines the current formal-approval and product gates. No migration/Auth/backend work begins in this documentation task.
 

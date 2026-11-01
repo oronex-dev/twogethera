@@ -1,6 +1,6 @@
 # Final decision proposals · CP-003B Part 2
 
-> **Historical decision record.** The body below preserves this review stage and its then-current statuses. The latest user directions and reconciled proposals are in [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md). Earlier blanket nonfinancial deletion, no-text-recovery and automatic 365-day audit recommendations are superseded there; they are not current policy. D01/D02 approvals and D03's recorded revision remain unchanged.
+> **Historical decision record.** The body below preserves this review stage and its then-current statuses. CP-006 has since formally approved D06 and D09; those two former “Pending user approval” labels below are historical only. No other proposal is approved by that update. The latest user directions and reconciled proposals are in [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md). Earlier blanket nonfinancial deletion, no-text-recovery and automatic 365-day audit recommendations are superseded there; they are not current policy. D01/D02 approvals and D03's recorded revision remain unchanged.
 
 **Status: all 17 recommendations below are PENDING USER APPROVAL.** “Final” names this consolidated review candidate; it does not mean approved or implemented. No policy recommendation changes current product functionality or authorizes migrations, Supabase configuration, authentication, credentials, a Git commit, or a push.
 

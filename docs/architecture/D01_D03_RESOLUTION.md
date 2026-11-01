@@ -1,6 +1,6 @@
 # CP-003B · Architecture approval resolution, Part 1
 
-> **Historical decision record.** The body below preserves this review stage and its then-current statuses. The latest user directions and reconciled proposals are in [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md). Earlier blanket nonfinancial deletion, no-text-recovery and automatic 365-day audit recommendations are superseded there; they are not current policy. D01/D02 approvals and D03's recorded revision remain unchanged.
+> **Historical decision record.** The body below preserves this review stage and its then-current statuses. CP-006 later formally approved D06 and D09 only; it did not change D01/D02 or resolve D03/P01–P09. See the current [decision specification](DECISION_SPECIFICATION.md) and [CP-006 approval addendum](APPROVAL_REVIEW.md). The latest user directions and reconciled proposals are in the decision specification. Earlier blanket nonfinancial deletion, no-text-recovery and automatic 365-day audit recommendations are superseded there; they are not current policy.
 
 This record captures the user's D01–D03 decisions verbatim. It supersedes incompatible CP-002 proposals and prior advisory recommendations. It is a documentation resolution, not permission to implement a database, backend, authentication, linking, or Flutter changes. The approved CP-003A visual design remains unchanged.
 
@@ -44,7 +44,7 @@ All P01–P09 are open. Candidate approaches describe options, not approved beha
 | P08 | Secondary copies and deletion completion evidence | Choose redaction/reset handling for sync after-images, snapshots, receipts, activity, search, server caches, issued media/export links, exports, object derivatives, logs and backups; establish measurable cleanup/restore rules | Sync-retention protocol, erasure worker and deployment configuration |
 | P09 | Audit-history necessity horizon and final purge | Decide duration, expiry triggers, authorized readers, zero-reader-space handling and any reviewed exceptional retention basis. “Auditable” does not mean keep forever | Ledger retention, zero-reader purge and backup lifecycle |
 
-No durations in this table are approved. D04–D11 remain pending with their original proposals unchanged. In particular, proposed 90-day logs, seven-day offline leases, 24-hour media/export targets and 30-day deletion grace are not approved by D01–D03. Selecting a number by copying it from CP-002 would silently decide an unresolved policy.
+At the time this D01–D03 record was prepared, no durations in this table were approved and D04–D11 retained their original proposals. CP-006 later approved D06/D09 policy wording only; proposed 90-day logs, seven-day offline leases, 24-hour media/export targets and 30-day deletion grace remain unapproved unless separately resolved. Selecting a number by copying it from CP-002 would silently decide an unresolved policy.
 
 ## Documentation requirements for the future lifecycle
 

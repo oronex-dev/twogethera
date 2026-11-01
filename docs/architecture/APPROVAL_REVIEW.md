@@ -2,7 +2,7 @@
 
 > **Historical decision record.** The body below preserves this review stage and its then-current statuses. The latest user directions and reconciled proposals are in [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md). Earlier blanket nonfinancial deletion, no-text-recovery and automatic 365-day audit recommendations are superseded there; they are not current policy. D01/D02 approvals and D03's recorded revision remain unchanged.
 
-Prepared 28 October 2026. **CP-003B Part 1: D01 approved; D02 approved with safeguards; D03 revised policy recorded, with implementation privacy choices unresolved. D04–D11 remain pending.** Titles are review labels. D01–D03 below reflect the current user decisions, superseding earlier advisory recommendations. D04–D11 preserve the original proposals/consequences and remain advisory. See [the resolution record](D01_D03_RESOLUTION.md) for open P01–P09 choices.
+Prepared 28 October 2026. This document's original status snapshot is historical. **CP-003B Part 1 recorded D01 approval, D02 approval with safeguards, and D03's revised policy; at that time D04–D11 were pending.** CP-006 later formally approved D06 and D09 only; see the addendum at the end and the current [decision specification](DECISION_SPECIFICATION.md). D03 implementation privacy choices and P01–P09 history remain as recorded. Titles are review labels.
 
 ## Baseline and validation
 
@@ -174,9 +174,37 @@ Prepared 28 October 2026. **CP-003B Part 1: D01 approved; D02 approved with safe
 
 ## Recommended next task
 
-D01–D03 have been addressed at the product-policy level as recorded above. Resolve P01–P09 before the affected privacy implementation; D04–D11 remain pending and are outside CP-003B Part 1. Do not treat visual approval, this record, or prior recommendations as approval of those remaining decisions.
+At the time of this 28 October review, D01–D03 had been addressed as recorded above and D04–D11 were pending. CP-006 later approved D06 and D09 only. Resolve P01–P09 before the affected privacy implementation; do not treat visual approval or other prior recommendations as approval of remaining decisions.
 
 After approval, CP-003 should start with pure domain identity/scope/revision/Money values and focused tests, then the approved persistence/security feasibility work in an isolated development environment. Database migrations and real authentication require explicit implementation authorization; they are not started by this review. Prove membership isolation, concurrent invite acceptance, idempotency, exact money, and revocation before product modules. No live Supabase project or paid dependency is needed for this review.
+
+## CP-006 formal approval addendum — 2 November 2026
+
+The product owner formally approved D06 and D09. This addendum supersedes only the “Pending user decision” status recorded under those two headings above. D01 and D02 retain their prior approval; D03 remains revised with unresolved implementation privacy choices. No other pending decision is approved here.
+
+### D06 — Invitation Security: APPROVED
+
+Adopt the proposal exactly as written:
+
+- Invitations are bound to a verified recipient email.
+- Each invitation uses a single-use 256-bit token.
+- Invitations expire after 24 hours.
+- Acceptance must be atomic.
+- Duplicate requests and replay attempts must be handled safely and idempotently.
+- Invitation creation and acceptance must have abuse limits.
+
+This approval does not choose numeric rate-limit thresholds, email normalization beyond the verified Auth identity, HMAC key rotation mechanics, or authorize automatic email delivery. Those require a reviewed implementation contract and tests.
+
+### D09 — Couple-Space Access: APPROVED
+
+Adopt the proposal exactly as written:
+
+- Shared planner data is writable only when exactly two active members are linked.
+- Unpaired accounts can access setup and invitation flows, not shared planner content.
+- Archived spaces are restricted to read/export/privacy-removal operations.
+- A third member or replacement member cannot join an existing couple space.
+
+This approval does not select a database state encoding or override D02/D03. P03/P04/P09 still govern which archived records may be read/exported and their retention; those data paths remain unavailable until their policies are resolved.
 
 ## Historical baseline verification (before CP-003B)
 

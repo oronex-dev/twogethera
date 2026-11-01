@@ -1,6 +1,6 @@
 # Application contracts and domain responsibilities
 
-**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for final proposed wording, status, tests, disclosures and implementation gates. D01/D02 approvals and D03’s recorded revision are preserved. Technical endorsement is pending formal approval; P03/P04/P09 product choices remain unresolved. No backend implementation is authorized.
+**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for wording, status, tests, disclosures and implementation gates. D01/D02/D06/D09 are approved; D03’s recorded revision and unresolved P03/P04/P09 choices are preserved. Other technical directions remain pending formal approval. No backend implementation is authorized.
 
 **Contract sketches, not implementation classes.** Keep the CP-001 Riverpod/GoRouter app and its feature-first boundaries. Introduce only the contracts needed by each approved slice. Avoid a generic `Repository<T>` that bypasses tenant, revision, ledger, or lifecycle rules.
 

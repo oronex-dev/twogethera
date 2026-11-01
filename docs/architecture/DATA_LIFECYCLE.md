@@ -1,6 +1,6 @@
 # Data lifecycle, export, unlinking and erasure — reconciled candidate
 
-**Current source:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) contains every decision, status, disclosure, security test and remaining blocker. D01/D02 approvals and [D03's recorded revision](D01_D03_RESOLUTION.md) are preserved. The specified technical directions are endorsed pending formal approval; P03/P04/P09 remain unresolved. This document reconciles the design, not a deployable retention configuration or legal-compliance claim. No tables, jobs, Auth or backend are implemented.
+**Current source:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) contains every decision, status, disclosure, security test and remaining blocker. D01/D02/D06/D09 are approved and [D03's recorded revision](D01_D03_RESOLUTION.md) is preserved. Other technical directions remain pending formal approval; P03/P04/P09 remain unresolved. This document reconciles the design, not a deployable retention configuration or legal-compliance claim. No tables, jobs, Auth or backend are implemented.
 
 ## Ownership and classification
 

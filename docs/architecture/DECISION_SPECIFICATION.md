@@ -1,14 +1,14 @@
 # Consolidated architecture decision specification · CP-003B final resolution
 
-**Documentation reconciliation only; no implementation authorization.** This is the single current decision specification. It supersedes incompatible *recommendations* in [FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md), the CP-002 blueprint and the historical review. It does not supersede or expand D01/D02 approvals or rewrite [D03’s recorded revision](D01_D03_RESOLUTION.md). Earlier records are retained as history.
+**Documentation reconciliation only; no implementation authorization.** This is the single current decision specification. It supersedes incompatible *recommendations* in [FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md), the CP-002 blueprint and the historical review. It preserves the existing D01/D02 approvals and [D03’s recorded revision](D01_D03_RESOLUTION.md). D06 and D09 were formally approved in CP-006 on 2 November 2026; this update records those exact policy boundaries without approving unrelated implementation details. Earlier records are retained as history.
 
-Status meanings: **already approved** applies only to D01 and D02 (D02 retains its safeguards). **technically endorsed pending formal approval** records the user's latest direction and all security/testing/disclosure conditions, without approving unresolved mechanisms, numerical defaults or backend work. **unresolved** covers D03's incomplete implementation package and revised P03/P04/P09 choices. No policy value marked proposed is an executable default. Endorsement is not migration, Auth, Supabase, dependency or commit permission.
+Status meanings: **already approved** applies to D01, D02, D06 and D09 (D02 retains its safeguards). **technically endorsed pending formal approval** records the user's direction and security/testing/disclosure conditions without approving unresolved mechanisms or numerical defaults. **unresolved** covers D03's incomplete implementation package and revised P03/P04/P09 choices. No unapproved policy value is an executable default. Formal policy approval is not migration, Auth, Supabase, dependency or commit permission.
 
 ## Complete decision matrix
 
 | ID | Decision | Status | Remaining gate |
 | --- | --- | --- | --- |
-| D01 | Couple membership and archive reuse | already approved | No product blocker within this approved boundary; D09 exact state rules still require formal approval. |
+| D01 | Couple membership and archive reuse | already approved | One active space/account and a two-member maximum remain in force; the D09 access boundary is also approved. |
 | D02 | Independent unlinking | already approved | Archive implementation depends on P03/P04/P09, without reopening the approved unilateral-exit rule. |
 | D03 | Recorded shared-record erasure revision | unresolved | Revision is recorded, not withdrawn or newly approved; unresolved P03/P04/P09 details prevent complete implementation approval. |
 | P01 | Minimal financial audit fields | technically endorsed pending formal approval | Formal approval of the exact field allowlist/time precision and P09 audience/horizon; integrity-marker format and canonical encoding require a tested design. Integrity evidence must cover only retained monetary facts, not hashes that preserve removed identity/text. |
@@ -22,10 +22,10 @@ Status meanings: **already approved** applies only to D01 and D02 (D02 retains i
 | P09 | Purpose-bounded contribution audit | unresolved | Select purpose and duration (e.g. 90/180/up to 365 days), audience and jurisdiction review. Any verified mandatory preservation needs separately reviewed narrow authority/access/expiry; no invented legal hold. |
 | D04 | Retention and offline lease | technically endorsed pending formal approval | Formal approval of limits and tested job/native enforcement; P08 backup feasibility. Do not publish unverified cleanup commitments. |
 | D05 | Exact savings integrity | technically endorsed pending formal approval | Formal approval; catalog/version and precise command canonicalization/integrity format. P09 blocks closed-ledger retention, not pure Money tests. |
-| D06 | Verified single-use invitation | technically endorsed pending formal approval | Formal approval; actual Auth canonicalization, verified-email change behavior, key rotation and rate-limit deployment need review. |
+| D06 | Verified single-use invitation | already approved | Implement verified-recipient binding, 256-bit single-use token, 24-hour expiry, atomic/idempotent acceptance and abuse limits; Auth email-change semantics, key handling and limit values need tested implementation choices. |
 | D07 | Private authenticated media | technically endorsed pending formal approval | Formal approval; actual Storage/cache/transform/proxy behavior must pass tests. Fail closed rather than weaken authorization for convenience. |
 | D08 | Trusted server and platform persistence | technically endorsed pending formal approval | Formal approval; encryption/key/credential spike, license review, threat model and browser session design. No dependencies selected/installed here. |
-| D09 | Draft, paired and archive commands | technically endorsed pending formal approval | Formal approval of exact state/count/write rules beyond D01 maximum-two limits; P03 archive audience remains unresolved. |
+| D09 | Unpaired, paired and archived access | already approved | Enforce no shared planner reads/writes when unpaired; paired shared planner writes require exactly two active members. P03/P04/P09 still constrain what an archived reader may access or export. |
 | D10 | Deletion and limited cancellation | technically endorsed pending formal approval | Formal approval with P07; secure reauthentication/recovery process and operational purge evidence. |
 | D11 | Recurrence identity and edge cases | technically endorsed pending formal approval | Formal approval; calendar library/tzdata compatibility and future-series-edit semantics, count behavior and RRULE interoperability must be specified/tested before recurrence migration. |
 
@@ -45,7 +45,7 @@ Each final proposed wording below includes its dependencies; an endorsed directi
 
 **User-facing disclosure:** One active space; no replacement-partner reuse or transfer of historical archives.
 
-**Remaining blocker:** No product blocker within this approved boundary; D09 exact state rules still require formal approval.
+**Remaining blocker:** No product blocker within the approved D01/D09 boundary; implementation must enforce it with server-side constraints and authorization tests.
 
 ### D02 — Independent unlinking
 
@@ -231,17 +231,17 @@ Each final proposed wording below includes its dependencies; an endorsed directi
 
 ### D06 — Verified single-use invitation
 
-**Status:** technically endorsed pending formal approval.
+**Status:** already approved (CP-006, 2 November 2026).
 
-**Final proposed wording:** Verified-email bound, manually shared 256-bit token, one use and 24-hour server expiry. Store digest and versioned email HMAC only. Atomic locked acceptance with idempotency and one pending invite; no anonymous redemption or silent identity merge.
+**Approved wording:** Invitations are bound to a verified recipient email. Each invitation uses a single-use 256-bit token and expires after 24 hours. Acceptance is atomic. Duplicate requests and replay attempts are handled safely and idempotently. Invitation creation and acceptance have abuse limits. The previously recorded proposal retains manual user sharing; this approval does not introduce automatic email delivery.
 
-**Implementation consequence:** Use existing canonical account/scope/space/invite lock order. Recheck verified recipient after locks; partial uniqueness prevents concurrent multi-space membership. Normalize whitespace/domain without inventing dot/plus aliases. Suggested issue 5/hour and acceptance 10/10 minutes remain workload-tested limits.
+**Implementation consequence:** Generate tokens with a cryptographically secure random source, return raw token material once, and persist only a verifier/digest plus a protected recipient binding. Under transaction locks, derive the actor from `auth.uid()`, re-read active account and verified recipient identity, check expiry/state/capacity, and atomically commit membership, invite consumption and idempotency receipt. Never accept an anonymous bearer as identity or silently merge accounts. Apply server-side limits to both invite creation and acceptance. No particular numeric thresholds are approved here.
 
-**Required security tests:** Double/third acceptance, accept into two spaces, expiry/revoke/unlink/deletion races, mismatched verified identity and replay; token absent from URLs/logs/storage/receipts.
+**Required security tests:** Double/concurrent acceptance, third-member and accept-into-two-spaces races, exactly-at/after expiry, revoked/used invite, verified-email mismatch/change, request replay with identical and conflicting payloads, rate-limit exhaustion/concurrency, and rollback on late transaction failure. Assert token material is absent from logs, URLs, persistent client storage, errors and receipts.
 
-**User-facing disclosure:** Show intended masked identity/expiry, manual sharing risk and revoke/regenerate; no account-existence lookup.
+**User-facing disclosure:** Show the masked intended verified address, 24-hour expiry, single-use behavior, manual-sharing risk and revoke/regenerate path. Do not reveal whether an unrelated email has an account.
 
-**Remaining blocker:** Formal approval; actual Auth canonicalization, verified-email change behavior, key rotation and rate-limit deployment need review.
+**Remaining implementation questions:** Use the Auth provider's verified email as the identity source; define and test email-change behavior, a non-aliasing canonical comparison, recipient-binding key custody/rotation, abuse-limit thresholds and observable retry behavior. These are implementation/security acceptance details, not pending product approval of D06.
 
 ### D07 — Private authenticated media
 
@@ -273,17 +273,17 @@ Each final proposed wording below includes its dependencies; an endorsed directi
 
 ### D09 — Draft, paired and archive commands
 
-**Status:** technically endorsed pending formal approval.
+**Status:** already approved (CP-006, 2 November 2026).
 
-**Final proposed wording:** Shared planner writes require exactly two active paired members. One-member draft permits metadata/invite/abandon only; no solo planner merge. Archives permit eligible read/export/removal, not additions/edits/ledger corrections or ordinary text restore. Privacy lifecycle changes are not general write permission.
+**Approved wording:** Shared planner data is writable only when exactly two active members are linked. Unpaired accounts can access setup and invitation flows, not shared planner content. Archived spaces are restricted to read/export/privacy-removal operations. A third member or replacement member cannot join an existing couple space.
 
-**Implementation consequence:** Deferred state counts plus unique active-user/seat constraints; no offline linking/unlinking/contributions to closed/unpaired space. Pending intent never retargeted to another partner.
+**Implementation consequence:** PostgreSQL must enforce the active-member limit, one active space per account, no archive reuse, and paired-only shared planner read/write authorization. Unpaired setup/invitation metadata is a distinct surface and cannot expose planner rows, aggregates, search, exports or media. Archives accept no new invitations, membership replacement, planner edits, ledger corrections or ordinary restore. The approved allowance for archive reads/exports does not define eligible record classes or retention; P03/P04/P09 remain fail-closed gates for those data paths. Privacy-removal operations remain separately scoped and cannot be used as general writes. Offline work is not authorized by this decision alone and must not retarget after unlink.
 
-**Required security tests:** Direct RPC/DML bypass in draft/archive; count/state races; stale offline commands on closure; privacy request cannot alter arbitrary archive fields.
+**Required security tests:** Unpaired direct SQL/API/RPC SELECT and aggregate denial for any shared planner record; setup/invitation projection isolation; two-member-only insert/update commands; concurrent third-member/replacement acceptance; archived write/invite denial and only policy-eligible read/export/removal; unlink versus writes/acceptance; old valid JWT after committed membership revocation; stale operation/receipt/cache denial. Verify constraints at commit over independent connections.
 
-**User-facing disclosure:** Explain pairing requirement, provisional offline writes and conditional read-only archive.
+**User-facing disclosure:** Explain that setup/invitation is available before linking, shared planner content is not; exactly two linked members are required for planner changes; archives cannot accept a replacement partner; and any archive view/export depends on the approved privacy and retention rules. Do not promise remote deletion of previously downloaded bytes.
 
-**Remaining blocker:** Formal approval of exact state/count/write rules beyond D01 maximum-two limits; P03 archive audience remains unresolved.
+**Remaining implementation questions:** Define the database state encoding and commit-time cardinality mechanism without expanding the approved behavior. Product policy is approved; archived record eligibility and retention remain unresolved under P03/P04/P09 and block those specific data surfaces, not isolated membership/invitation work.
 
 ### D10 — Deletion and limited cancellation
 
@@ -429,8 +429,8 @@ Documentation checks and exact changed-file scope are recorded after reconciliat
 
 ## Reconciliation validation result
 
-- All 20 decisions have final proposed wording, one of the three requested status labels, implementation consequences, required security tests, user disclosures and explicit blockers. Counts: 2 already approved, 14 technically endorsed pending formal approval, 4 unresolved (D03 package and P03/P04/P09).
-- D01/D02 exact approved wording and D03 exact recorded revision are preserved. The three earlier decision-review bodies are unchanged apart from clear historical/precedence notices.
+- All 20 decisions have current wording, status, implementation consequences, required security tests, disclosures and explicit blockers. Current counts: 4 already approved (D01/D02/D06/D09), 12 technically endorsed pending formal approval, and 4 unresolved (D03 package and P03/P04/P09).
+- D01/D02 approvals and D03's recorded revision are preserved. D06/D09 approvals are recorded from the CP-006 user instruction; prior decision-review text remains as dated history and is clearly superseded only for those two statuses.
 - Local Markdown links, table column structure, fenced blocks and heading structure were checked across the architecture package/root README. Mermaid remains text-inspected, not rendered by a diagram engine.
 - Git whitespace checks pass. Changes in this phase are confined to 12 architecture Markdown files: 11 existing documents plus this new consolidated specification. Existing unrelated/uncommitted work is preserved; HEAD and staging are unchanged.
 - Tracked and previously untracked application/platform/test/dependency/visual files match their initial fingerprints. No Flutter analysis/test/build or backend tests were run because this phase changed only documentation; future security tests above remain requirements, not results.

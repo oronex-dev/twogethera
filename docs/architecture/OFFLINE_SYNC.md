@@ -1,6 +1,6 @@
 # Offline-first synchronization protocol
 
-**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for final proposed wording, status, tests, disclosures and implementation gates. D01/D02 approvals and D03’s recorded revision are preserved. Technical endorsement is pending formal approval; P03/P04/P09 product choices remain unresolved. No backend implementation is authorized.
+**Current decision specification:** [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) is the reconciled source for wording, status, tests, disclosures and implementation gates. D01/D02/D06/D09 are approved; D03’s recorded revision and unresolved P03/P04/P09 choices are preserved. Other technical directions remain pending formal approval. No backend implementation is authorized.
 
 **Specification only.** Drift is the future local store, Supabase the authoritative acceptance boundary. Neither dependency is installed for this phase. [Data model](DATA_MODEL.md), [security rules](SECURITY_MODEL.md), and approval decisions D04/D08/D09 apply.
 

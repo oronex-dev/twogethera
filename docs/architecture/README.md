@@ -1,10 +1,10 @@
 # CP-002 · Data architecture and security blueprint
 
-Status: **proposed architecture; not deployed or security-certified**. Prepared 28 October 2026. No migrations, Dart implementation classes, authentication UI, dependencies, credentials, or backend connections are introduced. CP-001 remains the runnable baseline.
+Status: **proposed architecture; not deployed or security-certified**. The blueprint was prepared 28 October 2026. Subsequent CP-004 milestones added isolated, synthetic-only local PostgreSQL/Supabase proofs, and CP-005 added a local/debug Auth experience; these are not production migrations, production authentication or deployed RLS. The root application `supabase/migrations/` directory is absent. CP-001 remains the app foundation.
 
 ## Current reconciliation
 
-Read [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) first for the complete current matrix and policy/schema/protocol reconciliation. D01/D02 remain approved; D03 remains a recorded revision with unresolved implementation details. The user has technically endorsed the listed directions pending formal approval; P03/P04/P09 still need product resolution. Earlier proposal wording below is preserved history, not competing current defaults. No implementation is authorized.
+Read [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) first for the complete current matrix and policy/schema/protocol reconciliation. D01, D02, D06 and D09 are formally approved; D03 remains a recorded revision with unresolved implementation details. Other technical directions remain pending formal approval; P03/P04/P09 still need product resolution. The [CP-006 readiness report](../CP-006.md) records repository evidence and a bounded implementation sequence. Earlier proposal wording below is preserved history, not competing current defaults. This documentation update does not authorize implementation.
 
 ## Reading order
 
@@ -18,9 +18,9 @@ Read [DECISION_SPECIFICATION.md](DECISION_SPECIFICATION.md) first for the comple
 
 These documents specify a design to implement and test. Policy predicates and transaction algorithms are specifications, not runnable SQL. Database concurrency and adversarial authorization tests are required before any claim of production security.
 
-## Original product decision register — preserved history
+## Original product decision register — preserved wording and history
 
-Current CP-003B Part 1 status: **D01 approved; D02 approved with safeguards; D03 revised policy recorded, with implementation privacy choices unresolved. D04–D11 remain pending.** The user decisions and open P01–P09 choices are recorded in [D01_D03_RESOLUTION.md](D01_D03_RESOLUTION.md). This is documentation-only authorization; migrations/authentication remain out of scope.
+The table preserves the original proposal wording. D06/D09 status notes reflect CP-006; the dated review snapshots below retain their original status. D01–D03 user decisions and open P01–P09 choices are recorded in [D01_D03_RESOLUTION.md](D01_D03_RESOLUTION.md).
 
 For D01–D03, the table below contains the current user wording; D04–D11 retain their original proposed wording. Preliminary technical mechanisms remain designs to validate, not deployed or implicitly approved implementations.
 
@@ -31,10 +31,10 @@ For D01–D03, the table below contains the current user wording; D04–D11 reta
 | D03 | Preserve only necessary, auditable contribution history with pseudonymized attribution after account deletion. Shared text, notes, and photographs must have a clearly documented removal, retention, and export process. Do not assume indefinite retention of all shared content. | Revised policy recorded. No indefinite shared-content assumption; resolve P01–P09 before affected implementation. |
 | D04 | Change log/tombstones retained at least 90 days; offline read lease at most 7 days; account deletion grace 30 days; unreferenced uploads 24 hours; exports 24 hours | Stale clients require full snapshots; cached offline data cannot be remotely recalled |
 | D05 | One immutable ISO currency and minor-unit exponent per savings goal; recorded deposits and exact reversals only; no FX, bank integration, interest, or withdrawal workflow initially | Amounts never use floating point; planner records do not claim to verify real bank balances |
-| D06 | Invite is bound to a verified email identity, lasts 24 hours, and is single-use; user shares the link manually | No anonymous redemption or automatic email delivery; changing recipient requires a replacement invite |
+| D06 | Invite is bound to a verified email identity, lasts 24 hours, and is single-use; user shares the link manually | **Formally approved in CP-006** with 256-bit token, atomic acceptance, idempotent replay handling and required creation/acceptance abuse limits; no automatic email delivery |
 | D07 | Private photo bucket with authenticated reads; no downloadable signed bearer links in the initial product | Membership is checked on subsequent online reads; copies and in-flight bytes cannot be recalled |
 | D08 | Trusted-server model, not end-to-end encryption; native key storage/encrypted local persistence require a separate technical spike; web has weaker local secrecy | Do not advertise E2EE or equivalent browser/device security; user must understand offline cache risk |
-| D09 | Shared planner writes require a paired space; no shared content writes in an unpaired draft | No offline acceptance, unlinking, or contributions to an unpaired/archived space |
+| D09 | Shared planner writes require a paired space; no shared content writes in an unpaired draft | **Formally approved in CP-006:** planner writes require exactly two active linked members; unpaired setup/invites only; archives limited to read/export/privacy removal; no third/replacement member |
 | D10 | Account deletion immediately disables access; cancellable for 30 days through a restricted recovery flow; cancellation does not restore former memberships | Other partner is not held hostage to account recovery or deletion consent |
 | D11 | Missing monthly days/Feb 29 are skipped; DST gaps advance to first valid local instant and folds choose the earlier offset | Recurrence previews and reminder scheduler must share a versioned ruleset |
 
@@ -62,6 +62,6 @@ Design choices are Twogethera proposals. Platform behavior was checked against p
 
 Select the actual PostgreSQL/Supabase versions and verify feature compatibility when a development backend is approved; no database version has been provisioned here.
 
-## CP-003B Part 2 — pending consolidated review
+## Historical CP-003B Part 2 proposal review
 
-[FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md) reviews all nine open privacy choices and D04–D11, with specific recommended wording, risks, dependencies, disclosures and pending approval states. It is an advisory candidate, not an amendment to recorded approvals or authorization to implement a backend. Earlier proposals and history above remain unchanged; reconcile designs only after explicit user approval.
+[FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md) records the CP-003B review of nine privacy choices and D04–D11, with the recommendations and approval states as they stood then. CP-006 formally approved D06/D09 only; all other historical proposal states remain subject to the current consolidated specification. This history is not authorization to implement a backend.
