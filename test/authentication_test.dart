@@ -71,7 +71,7 @@ void main() {
   test('configuration rejects hosted URLs, secrets, bad ports and disabled environments', () {
     for (final url in [
       'https://example.supabase.co',
-      'http://127.0.0.1:54321',
+      'http://127.0.0.1:59321',
       'http://127.0.0.1:58321?token=x',
       'http://u:p@127.0.0.1:58321',
     ]) {
@@ -114,6 +114,17 @@ void main() {
       ),
       isNull,
     );
+  });
+  test('root local membership API uses the public schema', () {
+    final root = LocalAuthConfig.parse(
+      enabled: true,
+      environment: 'development',
+      url: 'http://127.0.0.1:54321',
+      publicKey: publicFixtureKey('anon'),
+    )!;
+    expect(root.dataSchema, 'public');
+    final lifecycle = config();
+    expect(lifecycle.dataSchema, 'cp004b2');
   });
   test('Android maps to Mac host alias; web and iOS map to loopback', () {
     for (final android in [false, true]) {

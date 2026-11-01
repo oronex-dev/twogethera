@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:supabase/supabase.dart';
 
 import '../domain/auth_repository.dart';
+import '../../partner_linking/domain/partner_invitation_repository.dart';
 import 'local_auth_clients.dart';
 
-class SupabaseAuthRepository implements AuthExperienceRepository {
+class SupabaseAuthRepository
+    implements AuthExperienceRepository, PartnerInvitationRepository {
   SupabaseAuthRepository({required this._createClients});
   final LocalAuthClients Function() _createClients;
   final _changes = StreamController<AuthSignal>.broadcast(sync: true);
@@ -424,6 +426,160 @@ class SupabaseAuthRepository implements AuthExperienceRepository {
       throw const AuthFailure(AuthProblem.expired);
     } catch (_) {
       throw const AuthFailure(AuthProblem.unavailable);
+    }
+  }
+
+  @override
+  Future<PartnerLinkContext> loadPartnerContext() async {
+    final data = await _partnerRpc('partner_link_context', const {});
+    if (data['user_id'] is! String) throw const PartnerInvitationFailure();
+    final rawSpace = data['space'];
+    PartnerSpaceSummary? space;
+    if (rawSpace != null) {
+      if (rawSpace is! Map ||
+          rawSpace['id'] is! String ||
+          rawSpace['state'] is! String ||
+          rawSpace['epoch'] is! int) {
+        throw const PartnerInvitationFailure();
+      }
+      final state = switch (rawSpace['state']) {
+        'draft' => PartnerSpaceState.draft,
+        'paired' => PartnerSpaceState.paired,
+        _ => throw const PartnerInvitationFailure(),
+      };
+      space = PartnerSpaceSummary(
+        id: rawSpace['id'] as String,
+        state: state,
+        authorizationEpoch: rawSpace['epoch'] as int,
+      );
+    }
+    final rawInvitation = data['invitation'];
+    PartnerInvitationSummary? invitation;
+    if (rawInvitation != null) {
+      if (rawInvitation is! Map ||
+          rawInvitation['id'] is! String ||
+          rawInvitation['state'] is! String ||
+          rawInvitation['recipient_hint'] is! String ||
+          rawInvitation['expires_at'] is! String) {
+        throw const PartnerInvitationFailure();
+      }
+      final state = switch (rawInvitation['state']) {
+        'pending' => PartnerInvitationState.pending,
+        'expired' => PartnerInvitationState.expired,
+        'revoked' => PartnerInvitationState.revoked,
+        _ => null,
+      };
+      final expiresAt = DateTime.tryParse(
+        rawInvitation['expires_at'] as String,
+      );
+      if (state == null || expiresAt == null) {
+        throw const PartnerInvitationFailure();
+      }
+      invitation = PartnerInvitationSummary(
+        id: rawInvitation['id'] as String,
+        state: state,
+        recipientHint: rawInvitation['recipient_hint'] as String,
+        expiresAt: expiresAt.toUtc(),
+      );
+    }
+    return PartnerLinkContext(space: space, invitation: invitation);
+  }
+
+  @override
+  Future<void> createDraftSpace(String operationId) async {
+    final clients = _authorizedClients();
+    try {
+      final result = await clients.data
+          .schema('public')
+          .rpc('create_couple_space', params: {'p_operation_id': operationId});
+      if (result is! String) throw const PartnerInvitationFailure();
+      clients.validSession();
+    } on PartnerInvitationFailure {
+      rethrow;
+    } catch (_) {
+      throw const PartnerInvitationFailure();
+    }
+  }
+
+  @override
+  Future<IssuedPartnerInvitation> issueInvitation({
+    required String operationId,
+    required String spaceId,
+    required int expectedEpoch,
+    required String recipientEmail,
+  }) async {
+    final data = await _partnerRpc('issue_partner_invitation', {
+      'p_operation_id': operationId,
+      'p_couple_id': spaceId,
+      'p_expected_epoch': expectedEpoch,
+      'p_recipient_email': recipientEmail,
+    });
+    if (data['status'] != 'created' ||
+        data['invitation_id'] is! String ||
+        data['recipient_hint'] is! String ||
+        data['expires_at'] is! String) {
+      throw const PartnerInvitationFailure();
+    }
+    final expiresAt = DateTime.tryParse(data['expires_at'] as String);
+    if (expiresAt == null) throw const PartnerInvitationFailure();
+    return IssuedPartnerInvitation(
+      invitationId: data['invitation_id'] as String,
+      recipientHint: data['recipient_hint'] as String,
+      expiresAt: expiresAt.toUtc(),
+      oneTimeToken: data['token'] is String ? data['token'] as String : null,
+      replayed: data['replayed'] == true,
+    );
+  }
+
+  @override
+  Future<String> acceptInvitation({
+    required String operationId,
+    required String oneTimeToken,
+  }) async {
+    final data = await _partnerRpc('accept_partner_invitation', {
+      'p_operation_id': operationId,
+      'p_token': oneTimeToken,
+    });
+    if (data['status'] != 'accepted' || data['space_id'] is! String) {
+      throw const PartnerInvitationFailure();
+    }
+    return data['space_id'] as String;
+  }
+
+  @override
+  Future<void> revokeInvitation({
+    required String operationId,
+    required String invitationId,
+  }) async {
+    final data = await _partnerRpc('revoke_partner_invitation', {
+      'p_operation_id': operationId,
+      'p_invitation_id': invitationId,
+    });
+    if (data['status'] != 'revoked') throw const PartnerInvitationFailure();
+  }
+
+  LocalAuthClients _authorizedClients() {
+    final clients = _clients;
+    if (clients == null) throw const PartnerInvitationFailure();
+    try {
+      clients.validSession();
+      return clients;
+    } catch (_) {
+      throw const PartnerInvitationFailure();
+    }
+  }
+
+  Future<Map> _partnerRpc(String function, Map<String, dynamic> params) async {
+    final clients = _authorizedClients();
+    try {
+      final result = await clients.data
+          .schema('public')
+          .rpc(function, params: params);
+      clients.validSession();
+      if (result is! Map) throw const PartnerInvitationFailure();
+      return result;
+    } catch (_) {
+      throw const PartnerInvitationFailure();
     }
   }
 

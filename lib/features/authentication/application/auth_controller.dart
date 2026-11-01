@@ -6,6 +6,7 @@ import '../../../core/config/local_auth_config.dart';
 import '../data/local_auth_clients.dart';
 import '../data/supabase_auth_repository.dart';
 import '../domain/auth_repository.dart';
+import '../../partner_linking/domain/partner_invitation_repository.dart';
 
 enum AuthPhase {
   signedOut,
@@ -36,6 +37,7 @@ final authClientFactoryProvider = Provider<LocalAuthClients Function()>((ref) {
     return LocalAuthClients(
       url: config.endpoint.toString(),
       publicKey: config.publicKey,
+      schema: config.dataSchema,
     );
   };
 });
@@ -46,6 +48,14 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   ref.onDispose(() => unawaited(repository.dispose()));
   return repository;
 });
+final partnerInvitationRepositoryProvider =
+    Provider<PartnerInvitationRepository>((ref) {
+      final repository = ref.watch(authRepositoryProvider);
+      if (repository is PartnerInvitationRepository) {
+        return repository as PartnerInvitationRepository;
+      }
+      throw const AuthFailure(AuthProblem.configuration);
+    });
 final authControllerProvider = NotifierProvider<AuthController, AuthViewState>(
   AuthController.new,
 );

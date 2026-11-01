@@ -36,7 +36,8 @@ class AuthWelcomeScreen extends StatelessWidget {
 }
 
 class LocalAuthScreen extends ConsumerStatefulWidget {
-  const LocalAuthScreen({super.key});
+  const LocalAuthScreen({this.nextRoute, super.key});
+  final String? nextRoute;
   @override
   ConsumerState<LocalAuthScreen> createState() => _LocalAuthScreenState();
 }
@@ -63,6 +64,10 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
       await ref
           .read(authControllerProvider.notifier)
           .signIn(_email.text, password);
+      if (mounted &&
+          ref.read(authControllerProvider).phase == AuthPhase.authenticated) {
+        context.go(widget.nextRoute ?? '/account');
+      }
     } finally {
       _submitting = false;
     }

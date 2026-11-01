@@ -27,6 +27,7 @@ class LocalAuthClients {
   LocalAuthClients({
     required String url,
     required String publicKey,
+    String schema = 'cp004b2',
     GoTrueClient? authClient,
   }) : endpoint = Uri.parse(url) {
     auth =
@@ -47,8 +48,8 @@ class LocalAuthClients {
         autoRefreshToken: false,
         pkceAsyncStorage: storage,
       ),
-      postgrestOptions: const PostgrestClientOptions(
-        schema: 'cp004b2',
+      postgrestOptions: PostgrestClientOptions(
+        schema: schema,
         retryEnabled: false,
         requestTimeout: Duration(seconds: 8),
       ),

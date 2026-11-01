@@ -21,6 +21,45 @@ class DashboardScreen extends StatelessWidget {
               'Room for the big dreams. And the beautifully ordinary days.',
         ),
         const SizedBox(height: 24),
+        SurfaceCard(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final text = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'A space for two',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Invite your partner with a private, one-time code.',
+                  ),
+                ],
+              );
+              final action = FilledButton.tonalIcon(
+                onPressed: () => context.go('/partner'),
+                icon: const Icon(Icons.favorite_border_rounded),
+                label: const Text('Partner linking'),
+              );
+              if (constraints.maxWidth < 680 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 20) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [text, const SizedBox(height: 20), action],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: text),
+                  const SizedBox(width: 24),
+                  action,
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 24),
         const AdaptiveGrid(
           children: [
             IdeaCard(

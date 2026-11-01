@@ -9,6 +9,10 @@ class LocalAuthConfig {
   final Uri endpoint;
   final String publicKey;
 
+  /// The committed membership foundation is exposed through `public` on the
+  /// root local project; earlier auth lifecycle proofs use their isolated API.
+  String get dataSchema => endpoint.port == 54321 ? 'public' : 'cp004b2';
+
   static LocalAuthConfig? fromEnvironment() => parse(
     enabled: kDebugMode && const bool.fromEnvironment('LOCAL_AUTH_ENABLED'),
     environment: const String.fromEnvironment(
@@ -34,7 +38,7 @@ class LocalAuthConfig {
     if (uri == null ||
         uri.scheme != 'http' ||
         !{'127.0.0.1', 'localhost', '::1', '10.0.2.2'}.contains(uri.host) ||
-        uri.port != 58321 ||
+        !{54321, 55321, 56321, 58321}.contains(uri.port) ||
         uri.userInfo.isNotEmpty ||
         (uri.path.isNotEmpty && uri.path != '/') ||
         uri.hasQuery ||
