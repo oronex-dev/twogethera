@@ -7,6 +7,7 @@ import '../data/local_auth_clients.dart';
 import '../data/supabase_auth_repository.dart';
 import '../domain/auth_repository.dart';
 import '../../partner_linking/domain/partner_invitation_repository.dart';
+import '../../shared_planner/domain/shared_planner_repository.dart';
 
 enum AuthPhase {
   signedOut,
@@ -56,6 +57,15 @@ final partnerInvitationRepositoryProvider =
       }
       throw const AuthFailure(AuthProblem.configuration);
     });
+final sharedPlannerRepositoryProvider = Provider<SharedPlannerRepository>((
+  ref,
+) {
+  final repository = ref.watch(authRepositoryProvider);
+  if (repository is SharedPlannerRepository) {
+    return repository as SharedPlannerRepository;
+  }
+  throw const AuthFailure(AuthProblem.configuration);
+});
 final authControllerProvider = NotifierProvider<AuthController, AuthViewState>(
   AuthController.new,
 );

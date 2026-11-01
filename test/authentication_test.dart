@@ -246,6 +246,21 @@ void main() {
       '/auth/local',
     );
     expect(find.text('Local account verified'), findsNothing);
+    container.read(appRouterProvider).go('/planner');
+    await tester.pumpAndSettle();
+    expect(
+      container.read(appRouterProvider).routeInformationProvider.value.uri.path,
+      '/auth/local',
+    );
+    expect(
+      container
+          .read(appRouterProvider)
+          .routeInformationProvider
+          .value
+          .uri
+          .queryParameters['next'],
+      '/planner',
+    );
   });
   testWidgets(
     'loading stays stable then authenticated route opens; suspension closes it',

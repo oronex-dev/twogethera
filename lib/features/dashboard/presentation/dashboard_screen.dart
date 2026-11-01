@@ -28,6 +28,45 @@ class DashboardScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
+                    'Make plans together',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Keep your shared ideas, important dates, and plans in one calm place.',
+                  ),
+                ],
+              );
+              final action = FilledButton.tonalIcon(
+                onPressed: () => context.go('/planner'),
+                icon: const Icon(Icons.event_note_outlined),
+                label: const Text('Open shared planner'),
+              );
+              if (constraints.maxWidth < 680 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 20) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [text, const SizedBox(height: 20), action],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: text),
+                  const SizedBox(width: 24),
+                  action,
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 24),
+        SurfaceCard(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final text = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
                     'A space for two',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),

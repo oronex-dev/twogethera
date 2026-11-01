@@ -8,10 +8,11 @@ class AdaptiveShell extends StatelessWidget {
   const AdaptiveShell({required this.path, required this.child, super.key});
   final String path;
   final Widget child;
-  static const paths = ['/', '/studio', '/settings'];
-  static const labels = ['Home', 'Studio', 'Appearance'];
+  static const paths = ['/', '/planner', '/studio', '/settings'];
+  static const labels = ['Home', 'Planner', 'Studio', 'Appearance'];
   static const icons = [
     Icons.space_dashboard_outlined,
+    Icons.event_note_outlined,
     Icons.auto_awesome_outlined,
     Icons.tune_rounded,
   ];
@@ -23,7 +24,7 @@ class AdaptiveShell extends StatelessWidget {
     final desktop = width >= AppLayout.desktop;
     final tablet = width >= AppLayout.tablet && !desktop;
     final drawer = width < AppLayout.tablet && largeText;
-    final selected = paths.indexOf(path).clamp(0, 2);
+    final selected = paths.indexOf(path).clamp(0, paths.length - 1);
     void go(int index) => context.go(paths[index]);
     return Scaffold(
       drawer: drawer
@@ -43,6 +44,8 @@ class AdaptiveShell extends StatelessWidget {
         title: Text(
           path == '/settings'
               ? 'Appearance'
+              : path == '/planner'
+              ? 'Shared planner'
               : desktop
               ? (path == '/studio' ? 'Visual studio' : 'Your space')
               : 'Twogethera',
@@ -58,7 +61,7 @@ class AdaptiveShell extends StatelessWidget {
           if (path != '/settings')
             IconButton(
               tooltip: 'Appearance settings',
-              onPressed: () => go(2),
+              onPressed: () => go(paths.indexOf('/settings')),
               icon: const Icon(Icons.tune_rounded),
             ),
           const SizedBox(width: 12),

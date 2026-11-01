@@ -4,10 +4,14 @@ import 'package:supabase/supabase.dart';
 
 import '../domain/auth_repository.dart';
 import '../../partner_linking/domain/partner_invitation_repository.dart';
+import '../../shared_planner/domain/shared_planner_repository.dart';
 import 'local_auth_clients.dart';
 
 class SupabaseAuthRepository
-    implements AuthExperienceRepository, PartnerInvitationRepository {
+    implements
+        AuthExperienceRepository,
+        PartnerInvitationRepository,
+        SharedPlannerRepository {
   SupabaseAuthRepository({required this._createClients});
   final LocalAuthClients Function() _createClients;
   final _changes = StreamController<AuthSignal>.broadcast(sync: true);
@@ -580,6 +584,222 @@ class SupabaseAuthRepository
       return result;
     } catch (_) {
       throw const PartnerInvitationFailure();
+    }
+  }
+
+  @override
+  Future<SharedPlannerSnapshot> load(String coupleId) async {
+    final clients = _authorizedClients();
+    try {
+      final schema = clients.data.schema('public');
+      final bucketRows = await schema
+          .from('bucket_list_items')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('created_at');
+      final dateRows = await schema
+          .from('important_dates')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('date_value');
+      final planRows = await schema
+          .from('plans')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('starts_at');
+      final planIds = (planRows as List)
+          .cast<Map>()
+          .map((row) => row['id'] as String)
+          .toList(growable: false);
+      final taskRows = planIds.isEmpty
+          ? const <Map>[]
+          : (await schema
+                    .from('plan_tasks')
+                    .select()
+                    .eq('couple_id', coupleId)
+                    .inFilter('plan_id', planIds)
+                    .order('sort_order'))
+                as List;
+      clients.validSession();
+      final tasksByPlan = <String, List<PlanTask>>{};
+      for (final row in taskRows.cast<Map>()) {
+        final task = PlanTask.fromJson(Map<String, dynamic>.from(row));
+        (tasksByPlan[task.planId] ??= []).add(task);
+      }
+      return SharedPlannerSnapshot(
+        bucketItems: List.unmodifiable(
+          bucketRows.cast<Map>().map(
+            (row) => BucketListItem.fromJson(Map<String, dynamic>.from(row)),
+          ),
+        ),
+        importantDates: List.unmodifiable(
+          dateRows.cast<Map>().map(
+            (row) =>
+                ImportantDateEntry.fromJson(Map<String, dynamic>.from(row)),
+          ),
+        ),
+        plans: List.unmodifiable(
+          planRows.cast<Map>().map(
+            (row) => SharedPlan.fromJson(
+              Map<String, dynamic>.from(row),
+              tasks: tasksByPlan[row['id'] as String] ?? const [],
+            ),
+          ),
+        ),
+      );
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> createBucketItem(String coupleId, Map<String, dynamic> values) =>
+      _plannerInsert('bucket_list_items', {'couple_id': coupleId, ...values});
+
+  @override
+  Future<void> updateBucketItem(
+    String coupleId,
+    BucketListItem item,
+    Map<String, dynamic> values,
+  ) => _plannerUpdate(
+    'bucket_list_items',
+    coupleId,
+    item.id,
+    item.revision,
+    values,
+  );
+
+  @override
+  Future<void> deleteBucketItem(String coupleId, BucketListItem item) =>
+      _plannerDelete(
+        'delete_bucket_list_item',
+        coupleId,
+        item.id,
+        item.revision,
+      );
+
+  @override
+  Future<void> createImportantDate(
+    String coupleId,
+    Map<String, dynamic> values,
+  ) => _plannerInsert('important_dates', {'couple_id': coupleId, ...values});
+
+  @override
+  Future<void> updateImportantDate(
+    String coupleId,
+    ImportantDateEntry date,
+    Map<String, dynamic> values,
+  ) => _plannerUpdate(
+    'important_dates',
+    coupleId,
+    date.id,
+    date.revision,
+    values,
+  );
+
+  @override
+  Future<void> deleteImportantDate(String coupleId, ImportantDateEntry date) =>
+      _plannerDelete('delete_important_date', coupleId, date.id, date.revision);
+
+  @override
+  Future<void> createPlan(String coupleId, Map<String, dynamic> values) =>
+      _plannerInsert('plans', {'couple_id': coupleId, ...values});
+
+  @override
+  Future<void> updatePlan(
+    String coupleId,
+    SharedPlan plan,
+    Map<String, dynamic> values,
+  ) => _plannerUpdate('plans', coupleId, plan.id, plan.revision, values);
+
+  @override
+  Future<void> deletePlan(String coupleId, SharedPlan plan) =>
+      _plannerDelete('delete_plan', coupleId, plan.id, plan.revision);
+
+  @override
+  Future<void> createTask(String coupleId, String planId, String title) =>
+      _plannerInsert('plan_tasks', {
+        'couple_id': coupleId,
+        'plan_id': planId,
+        'title': title,
+      });
+
+  @override
+  Future<void> updateTask(
+    String coupleId,
+    PlanTask task,
+    Map<String, dynamic> values,
+  ) => _plannerUpdate('plan_tasks', coupleId, task.id, task.revision, values);
+
+  @override
+  Future<void> deleteTask(String coupleId, PlanTask task) =>
+      _plannerDelete('delete_plan_task', coupleId, task.id, task.revision);
+
+  Future<void> _plannerInsert(String table, Map<String, dynamic> values) async {
+    final clients = _authorizedClients();
+    try {
+      await clients.data
+          .schema('public')
+          .from(table)
+          .insert(values)
+          .select('id')
+          .single();
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  Future<void> _plannerUpdate(
+    String table,
+    String coupleId,
+    String id,
+    int revision,
+    Map<String, dynamic> values,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      final row = await clients.data
+          .schema('public')
+          .from(table)
+          .update(values)
+          .eq('couple_id', coupleId)
+          .eq('id', id)
+          .eq('revision', revision)
+          .select('id')
+          .maybeSingle();
+      clients.validSession();
+      if (row == null) throw const SharedPlannerFailure();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  Future<void> _plannerDelete(
+    String function,
+    String coupleId,
+    String id,
+    int revision,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      final deleted = await clients.data
+          .schema('public')
+          .rpc(
+            function,
+            params: {
+              'p_couple_id': coupleId,
+              if (function == 'delete_bucket_list_item') 'p_item_id': id,
+              if (function == 'delete_important_date') 'p_date_id': id,
+              if (function == 'delete_plan') 'p_plan_id': id,
+              if (function == 'delete_plan_task') 'p_task_id': id,
+              'p_expected_revision': revision,
+            },
+          );
+      clients.validSession();
+      if (deleted != true) throw const SharedPlannerFailure();
+    } catch (_) {
+      throw const SharedPlannerFailure();
     }
   }
 
