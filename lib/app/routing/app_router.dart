@@ -12,6 +12,7 @@ import '../../features/authentication/presentation/local_auth_screen.dart';
 import '../../features/authentication/presentation/auth_callback_screen.dart';
 import '../../features/partner_linking/presentation/partner_linking_screen.dart';
 import '../../features/shared_planner/presentation/shared_planner_screen.dart';
+import '../../features/shared_planner/presentation/global_search_screen.dart';
 import '../../shared/widgets/responsive_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -36,9 +37,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (route.uri.path == '/planner' && !authenticated) {
         return '/auth/local?next=%2Fplanner';
       }
+      if (route.uri.path == '/search' && !authenticated) {
+        return '/auth/local?next=%2Fsearch';
+      }
       if (route.uri.path.startsWith('/auth/') && authenticated) {
         if (route.uri.queryParameters['next'] == '/partner') return '/partner';
         if (route.uri.queryParameters['next'] == '/planner') return '/planner';
+        if (route.uri.queryParameters['next'] == '/search') return '/search';
         return '/account';
       }
       return null;
@@ -73,6 +78,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             nextRoute: switch (state.uri.queryParameters['next']) {
               '/partner' => '/partner',
               '/planner' => '/planner',
+              '/search' => '/search',
               _ => null,
             },
           ),
@@ -105,6 +111,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/settings',
             builder: (context, state) => const SettingsScreen(),
+          ),
+          GoRoute(
+            path: '/search',
+            builder: (context, state) => const GlobalSearchScreen(),
           ),
         ],
       ),

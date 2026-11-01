@@ -8,11 +8,12 @@ class AdaptiveShell extends StatelessWidget {
   const AdaptiveShell({required this.path, required this.child, super.key});
   final String path;
   final Widget child;
-  static const paths = ['/', '/planner', '/studio', '/settings'];
-  static const labels = ['Home', 'Planner', 'Studio', 'Appearance'];
+  static const paths = ['/', '/planner', '/search', '/studio', '/settings'];
+  static const labels = ['Home', 'Planner', 'Search', 'Studio', 'Appearance'];
   static const icons = [
     Icons.space_dashboard_outlined,
     Icons.event_note_outlined,
+    Icons.search_rounded,
     Icons.auto_awesome_outlined,
     Icons.tune_rounded,
   ];

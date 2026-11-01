@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:supabase/supabase.dart';
 
+import '../../dashboard/domain/dashboard_preferences.dart';
 import '../domain/auth_repository.dart';
 import '../../partner_linking/domain/partner_invitation_repository.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
@@ -11,7 +12,8 @@ class SupabaseAuthRepository
     implements
         AuthExperienceRepository,
         PartnerInvitationRepository,
-        SharedPlannerRepository {
+        SharedPlannerRepository,
+        DashboardPreferencesRepository {
   SupabaseAuthRepository({required this._createClients});
   final LocalAuthClients Function() _createClients;
   final _changes = StreamController<AuthSignal>.broadcast(sync: true);
@@ -800,6 +802,45 @@ class SupabaseAuthRepository
       if (deleted != true) throw const SharedPlannerFailure();
     } catch (_) {
       throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<DashboardPreferences?> loadDashboardPreferences(String userId) async {
+    final clients = _authorizedClients();
+    try {
+      final row = await clients.data
+          .schema('public')
+          .from('user_dashboard_preferences')
+          .select('module_order,visible_modules')
+          .eq('user_id', userId)
+          .maybeSingle();
+      clients.validSession();
+      return row == null
+          ? null
+          : DashboardPreferences.fromJson(Map<String, dynamic>.from(row));
+    } catch (_) {
+      throw const DashboardPreferencesFailure();
+    }
+  }
+
+  @override
+  Future<void> saveDashboardPreferences(
+    String userId,
+    DashboardPreferences preferences,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      await clients.data
+          .schema('public')
+          .from('user_dashboard_preferences')
+          .upsert({
+            'user_id': userId,
+            ...preferences.toJson(),
+          }, onConflict: 'user_id');
+      clients.validSession();
+    } catch (_) {
+      throw const DashboardPreferencesFailure();
     }
   }
 

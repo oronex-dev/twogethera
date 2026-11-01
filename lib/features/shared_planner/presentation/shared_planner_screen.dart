@@ -21,9 +21,18 @@ class SharedPlannerScreen extends ConsumerStatefulWidget {
 
 class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
   String? _requestedCoupleId;
+  String? _openedSearchTarget;
 
   @override
   Widget build(BuildContext context) {
+    final uri = _routeUri(context);
+    final initialTab = (int.tryParse(uri.queryParameters['tab'] ?? '') ?? 0)
+        .clamp(0, 2);
+    final itemType = uri.queryParameters['type'];
+    final itemId = uri.queryParameters['item'];
+    final targetKey = itemType == null || itemId == null
+        ? null
+        : '$itemType:$itemId';
     final auth = ref.watch(authControllerProvider);
     final couple = auth.context?.spaces
         .where((space) => space.state == 'paired')
@@ -45,8 +54,17 @@ class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
     if (coupleId == null) return _unpaired();
     final state = ref.watch(sharedPlannerControllerProvider);
     final snapshot = state.snapshot;
+    if (snapshot != null &&
+        targetKey != null &&
+        targetKey != _openedSearchTarget) {
+      _openedSearchTarget = targetKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openSearchTarget(coupleId, snapshot, itemType!, itemId!);
+      });
+    }
     return DefaultTabController(
       length: 3,
+      initialIndex: initialTab,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Shared planner'),
@@ -109,6 +127,59 @@ class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
                   ),
                 ],
               ),
+      ),
+    );
+  }
+
+  Uri _routeUri(BuildContext context) {
+    try {
+      return GoRouterState.of(context).uri;
+    } catch (_) {
+      return Uri(path: '/planner');
+    }
+  }
+
+  void _openSearchTarget(
+    String coupleId,
+    SharedPlannerSnapshot snapshot,
+    String type,
+    String id,
+  ) {
+    switch (type) {
+      case 'bucket':
+        for (final item in snapshot.bucketItems) {
+          if (item.id == id) {
+            unawaited(_editBucket(context, ref, coupleId, item));
+            return;
+          }
+        }
+      case 'date':
+        for (final date in snapshot.importantDates) {
+          if (date.id == id) {
+            unawaited(_editDate(context, ref, coupleId, date));
+            return;
+          }
+        }
+      case 'plan':
+        for (final plan in snapshot.plans) {
+          if (plan.id == id) {
+            unawaited(_editPlan(context, ref, coupleId, plan));
+            return;
+          }
+        }
+      case 'task':
+        for (final plan in snapshot.plans) {
+          for (final task in plan.tasks) {
+            if (task.id == id) {
+              unawaited(_editTask(context, ref, task));
+              return;
+            }
+          }
+        }
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('That item is no longer available. Refresh the planner.'),
       ),
     );
   }
