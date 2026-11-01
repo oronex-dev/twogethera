@@ -1,0 +1,9 @@
+# Disposable local Supabase state and signing material; never commit.
+.branches
+.temp
+.local
+
+# Local dotenv state.
+.env.keys
+.env.local
+.env.*.local
