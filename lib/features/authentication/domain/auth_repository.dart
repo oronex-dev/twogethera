@@ -48,9 +48,18 @@ class SpaceContext {
 }
 
 class AccountContext {
-  const AccountContext({required this.userId, required this.spaces});
+  const AccountContext({
+    required this.userId,
+    required this.spaces,
+    this.displayName,
+    this.email,
+  });
   final String userId;
   final List<SpaceContext> spaces;
+
+  /// Display-only Auth metadata, never used to grant access.
+  final String? displayName;
+  final String? email;
 }
 
 abstract interface class AuthRepository {
@@ -71,4 +80,15 @@ abstract interface class LifecycleAuthRepository implements AuthRepository {
   Future<void> requestRecovery(String email);
   Future<void> verifyLink(String link, {required bool recovery});
   Future<void> updatePassword(String password);
+}
+
+/// Supported Auth operations used by the account creation/confirmation forms.
+abstract interface class AuthExperienceRepository
+    implements LifecycleAuthRepository {
+  Future<void> registerProfile(
+    String email,
+    String password,
+    String displayName,
+  );
+  Future<void> resendVerification(String email);
 }

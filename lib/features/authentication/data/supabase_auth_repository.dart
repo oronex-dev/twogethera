@@ -5,7 +5,7 @@ import 'package:supabase/supabase.dart';
 import '../domain/auth_repository.dart';
 import 'local_auth_clients.dart';
 
-class SupabaseAuthRepository implements LifecycleAuthRepository {
+class SupabaseAuthRepository implements AuthExperienceRepository {
   SupabaseAuthRepository({required this._createClients});
   final LocalAuthClients Function() _createClients;
   final _changes = StreamController<AuthSignal>.broadcast(sync: true);
@@ -203,7 +203,23 @@ class SupabaseAuthRepository implements LifecycleAuthRepository {
   }
 
   @override
-  Future<void> register(String email, String password) async {
+  Future<void> register(String email, String password) =>
+      _register(email, password);
+
+  @override
+  Future<void> registerProfile(
+    String email,
+    String password,
+    String displayName,
+  ) {
+    final name = displayName.trim();
+    if (name.length < 2 || name.length > 64) {
+      throw const AuthFailure(AuthProblem.invalidCredentials);
+    }
+    return _register(email, password, name: name);
+  }
+
+  Future<void> _register(String email, String password, {String? name}) async {
     await _discard(AuthSignal.cleared);
     _synthetic(email);
     if (password.length < 16) {
@@ -213,7 +229,11 @@ class SupabaseAuthRepository implements LifecycleAuthRepository {
     final version = _generation;
     try {
       final response = await clients.auth
-          .signUp(email: email, password: password)
+          .signUp(
+            email: email,
+            password: password,
+            data: name == null ? null : {'display_name': name},
+          )
           .timeout(const Duration(seconds: 8));
       _current(clients, version);
       if (response.session != null) {
@@ -227,6 +247,26 @@ class SupabaseAuthRepository implements LifecycleAuthRepository {
             ? AuthProblem.unavailable
             : AuthProblem.passwordRejected,
       );
+    }
+  }
+
+  @override
+  Future<void> resendVerification(String email) async {
+    await _discard(AuthSignal.cleared);
+    _synthetic(email);
+    final clients = _open();
+    final version = _generation;
+    try {
+      await clients.auth
+          .resend(type: OtpType.signup, email: email)
+          .timeout(const Duration(seconds: 8));
+      _current(clients, version);
+    } on AuthFailure {
+      rethrow;
+    } catch (error) {
+      _current(clients, version);
+      if (_transient(error)) throw const AuthFailure(AuthProblem.unavailable);
+      // Account-specific failures receive the same public acknowledgement.
     }
   }
 
@@ -360,6 +400,13 @@ class SupabaseAuthRepository implements LifecycleAuthRepository {
       return AccountContext(
         userId: session.user.id,
         spaces: List.unmodifiable(spaces),
+        displayName: switch (session.user.userMetadata?['display_name']) {
+          final String value
+              when value.trim().length >= 2 && value.trim().length <= 64 =>
+            value.trim(),
+          _ => null,
+        },
+        email: session.user.email,
       );
     } on AuthFailure {
       rethrow;

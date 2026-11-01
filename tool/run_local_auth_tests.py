@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CP-005A local fixture orchestration. Never passes admin credentials to Flutter.
-Usage: python3 tool/run_local_auth_tests.py chrome | <iOS simulator ID> | emulator-<port> [--restart-only] [--adb-reverse] [--lifecycle] [--functional-only]
+Usage: python3 tool/run_local_auth_tests.py chrome | <iOS simulator ID> | emulator-<port> [--restart-only] [--adb-reverse] [--lifecycle] [--functional-only] [--experience]
 """
 import re
 import time
@@ -192,9 +192,10 @@ def main():
     flags=set(sys.argv[2:])
     restart_only='--restart-only' in flags
     adb_reverse='--adb-reverse' in flags
-    lifecycle='--lifecycle' in flags
+    experience='--experience' in flags
+    lifecycle='--lifecycle' in flags or experience
     functional_only='--functional-only' in flags
-    require(len(flags)==len(sys.argv[2:]) and flags<= {'--restart-only','--adb-reverse','--lifecycle','--functional-only'} and not (restart_only and target=='chrome') and not (restart_only and lifecycle) and (not functional_only or (lifecycle and target!='chrome')),
+    require(len(flags)==len(sys.argv[2:]) and flags<= {'--restart-only','--adb-reverse','--lifecycle','--functional-only','--experience'} and not (experience and '--lifecycle' in flags) and not (restart_only and target=='chrome') and not (restart_only and lifecycle) and (not functional_only or (lifecycle and target!='chrome')),
             'Unsupported test selection')
     android=bool(re.fullmatch(r'emulator-[0-9]+',target))
     require(not adb_reverse or android,'ADB reverse requires a local Android emulator')
@@ -377,9 +378,9 @@ def main():
     generated=ROOT/('test/cp005b2_live_test.dart' if lifecycle else 'test/cp005a_live_test.dart')
     require(not generated.exists(),'Another local browser test entry already exists')
     if target=='chrome':
-        generated.write_text((ROOT/('test_local/lifecycle_browser_entry.dart' if lifecycle else 'test_local/browser_entry.dart')).read_text().replace('../test/support/','support/'))
-        command=['flutter','test','--platform','chrome',str(generated.relative_to(ROOT))]
-    else:command=['flutter','test','integration_test/lifecycle_test.dart' if lifecycle else 'integration_test/local_auth_test.dart','-d',target]
+        generated.write_text((ROOT/('test_local/experience_browser_entry.dart' if experience else 'test_local/lifecycle_browser_entry.dart' if lifecycle else 'test_local/browser_entry.dart')).read_text().replace('../test/support/','support/'))
+        command=['flutter','test','--no-pub','--platform','chrome',str(generated.relative_to(ROOT))]
+    else:command=['flutter','test','--no-pub','integration_test/auth_experience_test.dart' if experience else 'integration_test/lifecycle_test.dart' if lifecycle else 'integration_test/local_auth_test.dart','-d',target]
     command+=['--dart-define-from-file='+str(fixture_file),'--reporter','expanded']
     print('Running '+('native restart/storage proof only (functional suite NOT rerun)' if restart_only else 'real SDK/Flutter tests')+' against guarded local fixtures; credentials suppressed.',flush=True)
     reverse_created=[]

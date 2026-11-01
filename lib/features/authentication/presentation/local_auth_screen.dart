@@ -3,11 +3,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/config/local_auth_config.dart';
-import '../../../shared/widgets/design_components.dart';
-import '../../../shared/widgets/responsive_page.dart';
-import '../../../shared/widgets/together_mark.dart';
 import '../application/auth_controller.dart';
-import '../domain/auth_repository.dart';
+import 'auth_components.dart';
+
+class AuthWelcomeScreen extends StatelessWidget {
+  const AuthWelcomeScreen({super.key});
+  @override
+  Widget build(BuildContext context) => AuthFrame(
+    title: 'Your story, together.',
+    description: 'Make room for the moments that matter.',
+    onBack: () => context.go('/'),
+    backLabel: 'Back to preview',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton(
+          onPressed: () => context.go('/auth/local'),
+          child: const Text('Sign in'),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton(
+          onPressed: () => context.go('/auth/register'),
+          child: const Text('Create account'),
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          'Explore the authentication preview with a local test account. Partner spaces and shared content are not connected yet.',
+        ),
+      ],
+    ),
+  );
+}
 
 class LocalAuthScreen extends ConsumerStatefulWidget {
   const LocalAuthScreen({super.key});
@@ -16,8 +42,10 @@ class LocalAuthScreen extends ConsumerStatefulWidget {
 }
 
 class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
+  final _form = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  bool _submitting = false;
   @override
   void dispose() {
     _email.dispose();
@@ -25,157 +53,100 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
     super.dispose();
   }
 
+  Future<void> _submit() async {
+    if (_submitting || !(_form.currentState?.validate() ?? false)) return;
+    _submitting = true;
+    final password = _password.text;
+    _password.clear();
+    FocusManager.instance.primaryFocus?.unfocus();
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .signIn(_email.text, password);
+    } finally {
+      _submitting = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final config = ref.watch(localAuthConfigProvider);
     final state = ref.watch(authControllerProvider);
     final busy =
         state.phase == AuthPhase.loading || state.phase == AuthPhase.refreshing;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Local authentication'),
-        leading: IconButton(
-          tooltip: 'Back to preview',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/'),
-        ),
-      ),
-      body: ResponsivePage(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: SurfaceCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const TogetherMark(size: 80),
-                  const SizedBox(height: 24),
-                  const PreviewBadge(label: 'Development proof · memory only'),
-                  const SizedBox(height: 24),
-                  const SectionHeading(
-                    title: 'A thoughtful sign-in.',
-                    description: 'Use a synthetic @example.invalid account on the local test backend. This proof does not connect partners or load planner data.',
-                  ),
-                  const SizedBox(height: 24),
-                  if (config == null)
-                    Text(const AuthFailure(AuthProblem.configuration).message)
-                  else ...[
-                    AutofillGroup(
-                      onDisposeAction: AutofillContextAction.cancel,
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _email,
-                            enabled: !busy,
-                            key: const ValueKey('auth-email'),
-                            keyboardType: TextInputType.emailAddress,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            autofillHints: null,
-                            enableIMEPersonalizedLearning: false,
-                            decoration: const InputDecoration(
-                              labelText: 'Synthetic email',
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: _password,
-                            enabled: !busy,
-                            key: const ValueKey('auth-password'),
-                            obscureText: true,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            autofillHints: null,
-                            enableIMEPersonalizedLearning: false,
-                            decoration: const InputDecoration(
-                              labelText: 'Test password',
-                            ),
-                            onSubmitted: busy ? null : (_) => _submit(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: busy ? null : _submit,
-                      child: Text(
-                        busy ? 'Checking local access…' : 'Sign in locally',
-                      ),
-                    ),
-                    if (busy)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 16),
-                        child: LinearProgressIndicator(
-                          semanticsLabel: 'Checking local account access',
-                        ),
-                      ),
-                  ],
-                  if (state.problem != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Semantics(
-                        liveRegion: true,
-                        child: Text(AuthFailure(state.problem!).message),
-                      ),
-                    ),
-                  if (state.notice != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Semantics(
-                        liveRegion: true,
-                        child: Text(state.notice!),
-                      ),
-                    ),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => context.go('/auth/register'),
-                        child: const Text('Create synthetic account'),
-                      ),
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => context.go('/auth/verify'),
-                        child: const Text('Verify local confirmation'),
-                      ),
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => context.go('/auth/recovery'),
-                        child: const Text('Local password recovery'),
-                      ),
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => ref
-                                  .read(authControllerProvider.notifier)
-                                  .refreshSession(),
-                        child: const Text('Retry session refresh'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Local lifecycle proof only. OAuth, persistent login and automatic refresh are not enabled.',
-                  ),
-                ],
+    final configured = ref.watch(localAuthConfigProvider) != null;
+    return AuthFrame(
+      title: 'Welcome back.',
+      description: 'A quiet moment to pick up where you left off.',
+      onBack: () => context.go('/auth/welcome'),
+      backLabel: 'Back to welcome',
+      child: AutofillGroup(
+        onDisposeAction: AutofillContextAction.cancel,
+        child: Form(
+          key: _form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              authEmailField(
+                _email,
+                fieldKey: 'auth-email',
+                enabled: !busy && configured,
               ),
-            ),
+              const SizedBox(height: 16),
+              AuthPasswordField(
+                controller: _password,
+                label: 'Password',
+                fieldKey: 'auth-password',
+                enabled: !busy && configured,
+                validator: (value) =>
+                    (value?.isEmpty ?? true) ? 'Enter your password.' : null,
+                onSubmitted: !busy && configured ? _submit : null,
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: busy ? null : () => context.go('/auth/recovery'),
+                  child: const Text('Forgot password?'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: busy || !configured ? null : _submit,
+                child: Text(
+                  busy ? 'Checking local access…' : 'Sign in locally',
+                ),
+              ),
+              if (!configured)
+                const Padding(
+                  padding: EdgeInsets.only(top: 16),
+                  child: Text(
+                    'Local authentication is unavailable in this build. Open a configured development preview to try it.',
+                  ),
+                ),
+              AuthFeedback(state: state),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: busy ? null : () => context.go('/auth/register'),
+                child: const Text('New here? Create an account'),
+              ),
+              TextButton(
+                onPressed: busy ? null : () => context.go('/auth/verify'),
+                child: const Text('Confirm your email'),
+              ),
+              if (state.expired)
+                OutlinedButton(
+                  onPressed: busy
+                      ? null
+                      : () => ref
+                            .read(authControllerProvider.notifier)
+                            .refreshSession(),
+                  child: const Text('Retry session refresh'),
+                ),
+            ],
           ),
         ),
       ),
     );
-  }
-
-  Future<void> _submit() async {
-    final password = _password.text;
-    _password.clear();
-    await ref
-        .read(authControllerProvider.notifier)
-        .signIn(_email.text, password);
   }
 }
 
@@ -187,88 +158,64 @@ class LocalAccountScreen extends ConsumerWidget {
     final account = state.phase == AuthPhase.authenticated
         ? state.context
         : null;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Local account context'),
-        leading: IconButton(
-          tooltip: 'Back to preview',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/'),
-        ),
-      ),
-      body: ResponsivePage(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const PreviewBadge(label: 'Protected development proof'),
-            const SizedBox(height: 24),
-            const SectionHeading(
-              title: 'Your local access.',
-              description: 'This screen shows only the current server-authorized account context.',
+    return AuthFrame(
+      title: 'A space for you.',
+      description: 'Your account, with a little peace of mind.',
+      onBack: () => context.go('/'),
+      backLabel: 'Back to preview',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (account != null) ...[
+            const Icon(Icons.verified_user_outlined, size: 36),
+            const SizedBox(height: 16),
+            const Text(
+              'Local account verified',
+              key: ValueKey('account-verified'),
+            ),
+            const SizedBox(height: 16),
+            if (account.displayName != null)
+              Text(
+                account.displayName!,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            if (account.email != null) Text(account.email!),
+            const SizedBox(height: 16),
+            Text(
+              account.spaces.isEmpty
+                  ? 'Your account is ready. Partner linking is coming in a later milestone.'
+                  : 'Your space access is confirmed. Shared content is not connected yet.',
             ),
             const SizedBox(height: 24),
-            if (account != null)
-              SurfaceCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Local account verified',
-                      key: ValueKey('account-verified'),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      account.spaces.isEmpty
-                          ? 'No active couple space. Partner linking is deferred.'
-                          : '${account.spaces.length} active space authorized. Shared content is not loaded.',
-                    ),
-                    const SizedBox(height: 20),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        FilledButton(
-                          onPressed: () => ref
-                              .read(authControllerProvider.notifier)
-                              .reloadContext(),
-                          child: const Text('Check server access'),
-                        ),
-                        OutlinedButton(
-                          onPressed: () => ref
-                              .read(authControllerProvider.notifier)
-                              .refreshSession(),
-                          child: const Text('Refresh session'),
-                        ),
-                        OutlinedButton(
-                          onPressed: () => ref
-                              .read(authControllerProvider.notifier)
-                              .signOut(),
-                          child: const Text('Sign out'),
-                        ),
-                        OutlinedButton(
-                          onPressed: () => ref
-                              .read(authControllerProvider.notifier)
-                              .clearLocalSession(),
-                          child: const Text('Clear local proof session'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Clearing local memory does not revoke server sessions or previously issued tokens.',
-                    ),
-                  ],
-                ),
-              ),
+            FilledButton(
+              onPressed: () =>
+                  ref.read(authControllerProvider.notifier).signOut(),
+              child: const Text('Sign out'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () =>
+                  ref.read(authControllerProvider.notifier).reloadContext(),
+              child: const Text('Check server access'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  ref.read(authControllerProvider.notifier).refreshSession(),
+              child: const Text('Refresh session'),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Sign-out clears this device’s memory and requests server sign-out. Previously issued access tokens can remain valid until they expire.',
+            ),
           ],
-        ),
+          AuthFeedback(state: state),
+        ],
       ),
     );
   }
 }
 
-/// Minimal local email-flow exercise, using the approved reusable components.
-/// Links are pasted into RAM fields, never placed in a route/query/history.
+/// All credentials and mailbox links remain in RAM. No autofill persistence.
 class LocalLifecycleScreen extends ConsumerStatefulWidget {
   const LocalLifecycleScreen({
     super.key,
@@ -283,11 +230,21 @@ class LocalLifecycleScreen extends ConsumerStatefulWidget {
 }
 
 class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
+  final _form = GlobalKey<FormState>();
+  final _linkForm = GlobalKey<FormState>();
   final _email = TextEditingController();
+  final _name = TextEditingController();
   final _password = TextEditingController();
+  final _confirmation = TextEditingController();
   final _link = TextEditingController();
+  bool _submitting = false;
   Future<void> _back() async {
-    if (ref.read(authControllerProvider).phase == AuthPhase.recovering) {
+    final phase = ref.read(authControllerProvider).phase;
+    if ({
+      AuthPhase.recovering,
+      AuthPhase.loading,
+      AuthPhase.refreshing,
+    }.contains(phase)) {
       await ref.read(authControllerProvider.notifier).signOut();
     }
     if (mounted) context.go('/auth/local');
@@ -296,198 +253,224 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
   @override
   void dispose() {
     _email.dispose();
+    _name.dispose();
     _password.dispose();
+    _confirmation.dispose();
     _link.dispose();
     super.dispose();
   }
 
-  Widget field(
-    TextEditingController controller,
-    String label,
-    String key, {
-    bool password = false,
-    bool enabled = true,
-  }) => TextField(
-    controller: controller,
-    key: ValueKey(key),
-    enabled: enabled,
-    obscureText: password,
-    autocorrect: false,
-    enableSuggestions: false,
-    enableIMEPersonalizedLearning: false,
-    autofillHints: null,
-    decoration: InputDecoration(labelText: label),
-  );
+  Future<void> _submit({bool link = false, bool resend = false}) async {
+    if (_submitting) return;
+    final valid = link
+        ? _linkForm.currentState?.validate()
+        : _form.currentState?.validate();
+    if (valid != true) return;
+    _submitting = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final controller = ref.read(authControllerProvider.notifier);
+    final ready =
+        ref.read(authControllerProvider).phase == AuthPhase.recovering;
+    final password = _password.text;
+    final url = _link.text;
+    _password.clear();
+    _confirmation.clear();
+    _link.clear();
+    try {
+      if (link) {
+        await controller.verifyLink(url, recovery: widget.recovery);
+      } else if (ready) {
+        await controller.updatePassword(password);
+      } else if (resend) {
+        await controller.resendVerification(_email.text);
+      } else if (widget.registration) {
+        await controller.register(
+          _email.text,
+          password,
+          displayName: _name.text.trim(),
+        );
+        if (mounted &&
+            ref.read(authControllerProvider).phase ==
+                AuthPhase.awaitingConfirmation) {
+          context.go('/auth/verify');
+        }
+      } else {
+        await controller.requestRecovery(_email.text);
+      }
+    } finally {
+      _submitting = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(authControllerProvider);
-    final controller = ref.read(authControllerProvider.notifier);
     final busy =
         state.phase == AuthPhase.loading || state.phase == AuthPhase.refreshing;
     final configured = ref.watch(localAuthConfigProvider) != null;
-    final recovery = widget.recovery;
-    final ready = recovery && state.phase == AuthPhase.recovering;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          recovery ? 'Local password recovery' : 'Local email confirmation',
-        ),
-        leading: IconButton(
-          tooltip: 'Back to sign-in',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _back,
-        ),
-      ),
-      body: ResponsivePage(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: SurfaceCard(
-              child: AutofillGroup(
-                onDisposeAction: AutofillContextAction.cancel,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const TogetherMark(size: 64),
-                    const SizedBox(height: 24),
-                    const PreviewBadge(label: 'Local mailbox · RAM only'),
-                    const SizedBox(height: 24),
-                    SectionHeading(
-                      title: ready
-                          ? 'Choose a new password.'
-                          : recovery
-                          ? 'Recover local access.'
-                          : 'Confirm your local account.',
-                      description: 'Use only synthetic accounts and links from the development mailbox. Links are never opened in the browser or stored in navigation history.',
+    final enabled = configured && !busy;
+    final ready = widget.recovery && state.phase == AuthPhase.recovering;
+    final registration = widget.registration;
+    final verification = !registration && !widget.recovery;
+    return AuthFrame(
+      title: ready
+          ? 'A fresh start.'
+          : registration
+          ? 'Begin your story.'
+          : widget.recovery
+          ? 'Let’s get you back in.'
+          : 'Check your inbox.',
+      description: ready
+          ? 'Choose a new password, then sign in again.'
+          : registration
+          ? 'A few details, and you’re on your way.'
+          : widget.recovery
+          ? 'We’ll send a recovery message if your address is eligible.'
+          : 'Open the local development mailbox and use the newest confirmation link. Expired or used links cannot be reused.',
+      onBack: _back,
+      child: AutofillGroup(
+        onDisposeAction: AutofillContextAction.cancel,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!configured)
+              const Text(
+                'Local authentication is unavailable in this build. Use a configured development preview.',
+              ),
+            Form(
+              key: _form,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (registration) ...[
+                    TextFormField(
+                      key: const ValueKey('auth-display-name'),
+                      controller: _name,
+                      enabled: enabled,
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                      autofillHints: null,
+                      enableIMEPersonalizedLearning: false,
+                      validator: (value) =>
+                          (value?.trim().length ?? 0) < 2 ||
+                              (value?.trim().length ?? 0) > 64
+                          ? 'Use a display name between 2 and 64 characters.'
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Display name',
+                        errorMaxLines: 4,
+                      ),
                     ),
-                    const SizedBox(height: 24),
-                    if (!configured)
-                      Text(const AuthFailure(AuthProblem.configuration).message)
-                    else ...[
-                      if ((widget.registration || recovery) && !ready) ...[
-                        field(
-                          _email,
-                          'Synthetic email',
-                          'lifecycle-email',
-                          enabled: !busy,
-                        ),
-                        const SizedBox(height: 16),
-                        if (widget.registration) ...[
-                          field(
-                            _password,
-                            'Test password (16+ characters)',
-                            'lifecycle-password',
-                            password: true,
-                            enabled: !busy,
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        FilledButton(
-                          onPressed: busy
-                              ? null
-                              : () {
-                                  final password = _password.text;
-                                  _password.clear();
-                                  if (recovery) {
-                                    controller.requestRecovery(_email.text);
-                                  } else {
-                                    controller.register(_email.text, password);
-                                  }
-                                },
-                          child: Text(
-                            recovery
-                                ? 'Request local reset'
-                                : 'Request local confirmation',
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-                      if (ready) ...[
-                        field(
-                          _password,
-                          'New password (16+ characters)',
-                          'lifecycle-password',
-                          password: true,
-                          enabled: !busy,
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          onPressed: busy
-                              ? null
-                              : () {
-                                  final password = _password.text;
-                                  _password.clear();
-                                  controller.updatePassword(password);
-                                },
-                          child: const Text('Update password'),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Password reset revokes Auth refresh sessions and requires fresh sign-in. Issued access tokens may last until expiry.',
-                        ),
-                      ] else ...[
-                        field(
-                          _link,
-                          recovery
-                              ? 'Local recovery link'
-                              : 'Local confirmation link',
-                          'lifecycle-link',
-                          password: true,
-                          enabled: !busy,
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          onPressed: busy
-                              ? null
-                              : () {
-                                  final link = _link.text;
-                                  _link.clear();
-                                  controller.verifyLink(
-                                    link,
-                                    recovery: recovery,
-                                  );
-                                },
-                          child: Text(
-                            recovery
-                                ? 'Verify recovery link'
-                                : 'Verify confirmation link',
-                          ),
-                        ),
-                      ],
-                    ],
-                    if (busy)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 16),
-                        child: LinearProgressIndicator(
-                          semanticsLabel: 'Processing local authentication',
-                        ),
-                      ),
-                    if (state.notice != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: Semantics(
-                          liveRegion: true,
-                          child: Text(state.notice!),
-                        ),
-                      ),
-                    if (state.problem != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: Semantics(
-                          liveRegion: true,
-                          child: Text(AuthFailure(state.problem!).message),
-                        ),
-                      ),
-                    TextButton(
-                      onPressed: busy ? null : _back,
-                      child: const Text('Return to sign-in'),
-                    ),
+                    const SizedBox(height: 16),
                   ],
-                ),
+                  if (!ready) ...[
+                    authEmailField(
+                      _email,
+                      fieldKey: 'lifecycle-email',
+                      enabled: enabled,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (registration || ready) ...[
+                    AuthPasswordField(
+                      controller: _password,
+                      label: ready ? 'New password' : 'Password',
+                      fieldKey: 'lifecycle-password',
+                      enabled: enabled,
+                      action: TextInputAction.next,
+                      validator: validateNewPassword,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Use at least 16 characters. A memorable phrase works well.',
+                    ),
+                    const SizedBox(height: 16),
+                    AuthPasswordField(
+                      controller: _confirmation,
+                      label: 'Confirm password',
+                      fieldKey: 'auth-confirm-password',
+                      enabled: enabled,
+                      validator: (value) =>
+                          value != _password.text || (value?.isEmpty ?? true)
+                          ? 'Your passwords need to match.'
+                          : null,
+                      onSubmitted: enabled ? _submit : null,
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                  FilledButton(
+                    onPressed: !enabled
+                        ? null
+                        : () => _submit(resend: verification),
+                    child: Text(
+                      busy
+                          ? 'Please wait…'
+                          : ready
+                          ? 'Update password'
+                          : registration
+                          ? 'Create account'
+                          : verification
+                          ? 'Resend confirmation'
+                          : 'Send recovery email',
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
+            if (ready) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'After a reset, sign in with your new password. If the request is interrupted, the password may already have changed; try signing in or request a fresh recovery link.',
+              ),
+            ] else if (!registration) ...[
+              const SizedBox(height: 28),
+              const Divider(),
+              const SizedBox(height: 16),
+              const Text(
+                'Using the local mailbox? Paste the link here. It is processed in memory without opening its destination.',
+              ),
+              const SizedBox(height: 16),
+              Form(
+                key: _linkForm,
+                child: TextFormField(
+                  key: const ValueKey('lifecycle-link'),
+                  controller: _link,
+                  enabled: enabled,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  enableIMEPersonalizedLearning: false,
+                  autofillHints: null,
+                  validator: (value) => (value?.trim().isEmpty ?? true)
+                      ? 'Paste the newest local mailbox link.'
+                      : null,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: enabled ? (_) => _submit(link: true) : null,
+                  decoration: InputDecoration(
+                    labelText: widget.recovery
+                        ? 'Local recovery link'
+                        : 'Local confirmation link',
+                    errorMaxLines: 4,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: enabled ? () => _submit(link: true) : null,
+                child: Text(
+                  widget.recovery
+                      ? 'Verify recovery link'
+                      : 'Verify confirmation link',
+                ),
+              ),
+            ],
+            AuthFeedback(state: state),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: busy ? null : _back,
+              child: const Text('Return to sign-in'),
+            ),
+          ],
         ),
       ),
     );

@@ -9,6 +9,7 @@ import '../../features/design_studio/presentation/design_studio_screen.dart';
 import '../../shared/widgets/adaptive_shell.dart';
 import '../../features/authentication/application/auth_controller.dart';
 import '../../features/authentication/presentation/local_auth_screen.dart';
+import '../../features/authentication/presentation/auth_callback_screen.dart';
 import '../../shared/widgets/responsive_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -19,6 +20,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     redirect: (context, route) {
       if (!kDebugMode) return null;
+      if (route.uri.path == '/auth/callback') return null;
       final phase = ref.read(authControllerProvider).phase;
       final authenticated = phase == AuthPhase.authenticated;
       if (phase == AuthPhase.recovering &&
@@ -33,6 +35,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       if (kDebugMode) ...[
+        GoRoute(
+          path: '/auth/welcome',
+          builder: (context, state) => const AuthWelcomeScreen(),
+        ),
+        GoRoute(
+          path: '/auth/callback',
+          builder: (context, state) => AuthCallbackScreen(uri: state.uri),
+        ),
         GoRoute(
           path: '/auth/register',
           builder: (context, state) =>

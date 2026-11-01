@@ -118,13 +118,39 @@ class AuthController extends Notifier<AuthViewState> {
     return _lifecycle.accountContext();
   }, during: AuthPhase.refreshing);
 
-  Future<void> register(String email, String password) => _run(
+  Future<void> register(String email, String password, {String? displayName}) =>
+      _run(
+        () async {
+          if (displayName == null) {
+            await _lifecycle.register(email.trim(), password);
+          } else {
+            final repository = _lifecycle;
+            if (repository is! AuthExperienceRepository) {
+              throw const AuthFailure(AuthProblem.configuration);
+            }
+            await repository.registerProfile(
+              email.trim(),
+              password,
+              displayName,
+            );
+          }
+          return null;
+        },
+        success: AuthPhase.awaitingConfirmation,
+        notice: 'If the request is eligible, check the local development mailbox for confirmation.',
+      );
+
+  Future<void> resendVerification(String email) => _run(
     () async {
-      await _lifecycle.register(email.trim(), password);
+      final repository = _lifecycle;
+      if (repository is! AuthExperienceRepository) {
+        throw const AuthFailure(AuthProblem.configuration);
+      }
+      await repository.resendVerification(email.trim());
       return null;
     },
     success: AuthPhase.awaitingConfirmation,
-    notice: 'If the request is eligible, check the local development mailbox for confirmation.',
+    notice: 'If the address is eligible, a new confirmation message will appear in the local development mailbox. Use the newest link.',
   );
 
   Future<void> requestRecovery(String email) => _run(

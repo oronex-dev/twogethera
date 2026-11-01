@@ -30,3 +30,7 @@ Future<String> persistenceSnapshot() async {
     'indexedDB': _stringify(await _databases().toDart),
   });
 }
+
+@JS('location.href')
+external String get _href;
+bool locationOmits(String sensitive) => !_href.contains(sensitive);

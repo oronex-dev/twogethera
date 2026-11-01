@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/theme_mode_controller.dart';
 import '../../../shared/widgets/design_components.dart';
@@ -20,6 +22,14 @@ class SettingsScreen extends ConsumerWidget {
           description: 'Choose a comfortable appearance. Your choice lasts for this session.',
         ),
         const SizedBox(height: 32),
+        if (kDebugMode) ...[
+          OutlinedButton.icon(
+            onPressed: () => context.go('/auth/welcome'),
+            icon: const Icon(Icons.person_outline_rounded),
+            label: const Text('Explore local authentication'),
+          ),
+          const SizedBox(height: 24),
+        ],
         AdaptiveGrid(
           minWidth: 360,
           children: [
