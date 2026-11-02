@@ -2,9 +2,9 @@
 -- Raw invitation tokens are returned once and are never stored.
 BEGIN;
 
--- The Auth-owned bridge reads only the current caller's verified email. It does
--- not accept a user ID or expose Auth rows to the membership owner.
-GRANT USAGE, CREATE ON SCHEMA app_private TO supabase_auth_admin;
+-- The postgres-owned bridge reads only the current caller's verified email.
+-- Managed Supabase reserves supabase_auth_admin and does not let postgres
+-- assume it; the custom app role must not receive direct Auth-table access.
 CREATE FUNCTION app_private.current_verified_email(p_lock boolean DEFAULT false)
 RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
@@ -33,11 +33,12 @@ BEGIN
   RETURN v_email;
 END
 $function$;
-ALTER FUNCTION app_private.current_verified_email(boolean) OWNER TO supabase_auth_admin;
-REVOKE CREATE ON SCHEMA app_private FROM supabase_auth_admin;
+ALTER FUNCTION app_private.current_verified_email(boolean) OWNER TO postgres;
 REVOKE ALL ON FUNCTION app_private.current_verified_email(boolean) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION app_private.current_verified_email(boolean) TO twogethera_membership_owner;
 
+-- pgcrypto is required for invitation entropy, token digests and email HMACs.
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 GRANT USAGE ON SCHEMA extensions TO twogethera_membership_owner;
 GRANT EXECUTE ON FUNCTION extensions.gen_random_bytes(integer) TO twogethera_membership_owner;
 GRANT EXECUTE ON FUNCTION extensions.hmac(bytea, bytea, text) TO twogethera_membership_owner;
@@ -59,7 +60,7 @@ VALUES (1, extensions.gen_random_bytes(32));
 CREATE TABLE app_private.partner_invitations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   couple_id uuid NOT NULL REFERENCES public.couple_spaces(id) ON DELETE RESTRICT,
-  issuer_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  issuer_user_id uuid NOT NULL,
   token_digest bytea NOT NULL UNIQUE CHECK (octet_length(token_digest) = 32),
   recipient_hmac bytea NOT NULL CHECK (octet_length(recipient_hmac) = 32),
   recipient_hint text NOT NULL CHECK (length(recipient_hint) <= 254),
@@ -67,7 +68,7 @@ CREATE TABLE app_private.partner_invitations (
   state text NOT NULL CHECK (state IN ('pending', 'accepted', 'revoked', 'expired')),
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
-  accepted_by uuid REFERENCES auth.users(id) ON DELETE RESTRICT,
+  accepted_by uuid,
   accepted_at timestamptz,
   CHECK ((state = 'accepted') = (accepted_by IS NOT NULL)),
   CHECK ((state = 'accepted') = (accepted_at IS NOT NULL))
@@ -78,7 +79,7 @@ CREATE INDEX partner_invitations_couple_created
   ON app_private.partner_invitations(couple_id, created_at DESC);
 
 CREATE TABLE app_private.partner_invitation_receipts (
-  actor_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  actor_user_id uuid NOT NULL,
   operation_id uuid NOT NULL,
   request_hash bytea NOT NULL CHECK (octet_length(request_hash) = 32),
   couple_id uuid NOT NULL REFERENCES public.couple_spaces(id) ON DELETE RESTRICT,
@@ -88,7 +89,7 @@ CREATE TABLE app_private.partner_invitation_receipts (
 );
 
 CREATE TABLE app_private.partner_invitation_limits (
-  actor_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  actor_user_id uuid NOT NULL,
   action text NOT NULL CHECK (action IN ('issue', 'accept')),
   window_started_at timestamptz NOT NULL,
   attempts smallint NOT NULL CHECK (attempts > 0),
@@ -193,7 +194,6 @@ BEGIN
   RETURN jsonb_build_object('user_id', v_actor);
 END
 $function$;
-ALTER FUNCTION public.ensure_account() OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.ensure_account() FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.ensure_account() TO authenticated;
 
@@ -211,7 +211,6 @@ BEGIN
   RETURN jsonb_build_object('user_id', v_actor, 'spaces', v_spaces);
 END
 $function$;
-ALTER FUNCTION public.account_context() OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.account_context() FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.account_context() TO authenticated;
 
@@ -249,7 +248,6 @@ BEGIN
   );
 END
 $function$;
-ALTER FUNCTION public.partner_link_context() OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.partner_link_context() FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.partner_link_context() TO authenticated;
 
@@ -319,7 +317,6 @@ BEGIN
   RETURN v_result || jsonb_build_object('token', v_token);
 END
 $function$;
-ALTER FUNCTION public.issue_partner_invitation(uuid, uuid, bigint, text) OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.issue_partner_invitation(uuid, uuid, bigint, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.issue_partner_invitation(uuid, uuid, bigint, text) TO authenticated;
 
@@ -385,7 +382,6 @@ BEGIN
   RETURN v_result;
 END
 $function$;
-ALTER FUNCTION public.accept_partner_invitation(uuid, text) OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.accept_partner_invitation(uuid, text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.accept_partner_invitation(uuid, text) TO authenticated;
 
@@ -422,7 +418,6 @@ BEGIN
   RETURN v_result;
 END
 $function$;
-ALTER FUNCTION public.revoke_partner_invitation(uuid, uuid) OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.revoke_partner_invitation(uuid, uuid) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.revoke_partner_invitation(uuid, uuid) TO authenticated;
 

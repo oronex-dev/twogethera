@@ -22,23 +22,27 @@ BEGIN
          AND NOT rolbypassrls
          AND NOT rolinherit
          AND shobj_description(oid, 'pg_authid') = 'twogethera:cp006a:membership-owner:v1'
-     ) OR EXISTS (
-       SELECT 1 FROM pg_auth_members WHERE roleid = v_owner OR member = v_owner
+       ) OR EXISTS (
+       SELECT 1 FROM pg_auth_members
+       WHERE member = v_owner
+          OR (roleid = v_owner AND member <> (SELECT oid FROM pg_roles WHERE rolname = 'postgres'))
      ) THEN
     RAISE EXCEPTION 'unsafe membership owner role' USING ERRCODE = '42501';
   END IF;
 END $$;
 
+-- Supabase's managed postgres role is not a superuser. Grant it the ability to
+-- SET ROLE for migration-owned DDL, while keeping the application role isolated
+-- from API roles and all other principals.
+GRANT twogethera_membership_owner TO postgres;
+
 CREATE SCHEMA IF NOT EXISTS app_private AUTHORIZATION twogethera_membership_owner;
 REVOKE ALL ON SCHEMA app_private FROM PUBLIC, anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA app_private TO authenticated;
-GRANT USAGE ON SCHEMA auth TO supabase_auth_admin;
-GRANT USAGE ON SCHEMA auth TO twogethera_membership_owner;
-GRANT REFERENCES (id) ON auth.users TO twogethera_membership_owner;
 
--- This narrow Auth-owned bridge only answers for the signed-in principal.
--- It accepts no user ID and returns no email or Auth row data.
-GRANT CREATE ON SCHEMA app_private TO supabase_auth_admin;
+-- This narrow postgres-owned bridge is required because managed Supabase does
+-- not let postgres assume supabase_auth_admin, and app roles cannot access
+-- Auth-managed rows. It answers only for the signed-in principal.
 CREATE FUNCTION app_private.current_identity_is_verified(p_lock boolean DEFAULT false)
 RETURNS uuid
 LANGUAGE plpgsql
@@ -74,8 +78,7 @@ BEGIN
   RETURN v_user_id;
 END
 $function$;
-ALTER FUNCTION app_private.current_identity_is_verified(boolean) OWNER TO supabase_auth_admin;
-REVOKE CREATE ON SCHEMA app_private FROM supabase_auth_admin;
+ALTER FUNCTION app_private.current_identity_is_verified(boolean) OWNER TO postgres;
 REVOKE ALL ON FUNCTION app_private.current_identity_is_verified(boolean) FROM PUBLIC, anon, authenticated, service_role;
 
 GRANT CREATE ON SCHEMA public TO twogethera_membership_owner;
@@ -98,7 +101,10 @@ CREATE TABLE public.couple_spaces (
 CREATE TABLE public.couple_memberships (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   couple_id uuid NOT NULL REFERENCES public.couple_spaces(id) ON DELETE RESTRICT,
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  -- Auth identity is revalidated by the private postgres-owned bridge. Avoid
+  -- a cross-schema FK: managed Auth grants do not permit custom role owners to
+  -- reference auth.users, and account deletion policy is not implemented yet.
+  user_id uuid NOT NULL,
   seat smallint NOT NULL CHECK (seat IN (1,2)),
   -- CP-006A supports active/revoked only. Archive entitlements are a separate,
   -- policy-gated lifecycle and are deliberately not encoded as membership state.
@@ -118,7 +124,7 @@ CREATE INDEX couple_memberships_scope_state
   ON public.couple_memberships(couple_id, state, seat);
 
 CREATE TABLE app_private.couple_create_receipts (
-  actor_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
+  actor_user_id uuid NOT NULL,
   operation_id uuid NOT NULL,
   couple_id uuid NOT NULL REFERENCES public.couple_spaces(id) ON DELETE RESTRICT,
   committed_at timestamptz NOT NULL DEFAULT statement_timestamp(),
@@ -126,7 +132,6 @@ CREATE TABLE app_private.couple_create_receipts (
 );
 
 RESET ROLE;
-REVOKE CREATE ON SCHEMA public FROM twogethera_membership_owner;
 GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT SELECT ON public.couple_spaces, public.couple_memberships TO authenticated;
 REVOKE ALL ON public.couple_spaces, public.couple_memberships FROM PUBLIC, anon, authenticated, service_role;
@@ -148,7 +153,7 @@ AS $function$
       SELECT 1 FROM public.couple_memberships AS m
       JOIN public.couple_spaces AS s ON s.id = m.couple_id
       WHERE m.couple_id = p_couple_id
-        AND m.user_id = auth.uid()
+        AND m.user_id = app_private.current_identity_is_verified(false)
         AND m.state = 'active'
         AND s.state IN ('draft','paired')
     )
@@ -169,7 +174,7 @@ AS $function$
       SELECT 1 FROM public.couple_memberships AS actor
       JOIN public.couple_spaces AS s ON s.id = actor.couple_id
       WHERE actor.couple_id = p_couple_id
-        AND actor.user_id = auth.uid()
+        AND actor.user_id = app_private.current_identity_is_verified(false)
         AND actor.state = 'active'
         AND s.state = 'paired'
         AND 2 = (SELECT count(*) FROM public.couple_memberships AS active_member
@@ -317,6 +322,7 @@ REVOKE ALL ON FUNCTION public.create_couple_space(uuid) FROM PUBLIC, anon, servi
 GRANT EXECUTE ON FUNCTION public.create_couple_space(uuid) TO authenticated;
 
 RESET ROLE;
+REVOKE CREATE ON SCHEMA public FROM twogethera_membership_owner;
 GRANT EXECUTE ON FUNCTION app_private.current_identity_is_verified(boolean) TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION app_private.enforce_space_transition() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.enforce_membership_transition() FROM PUBLIC, anon, authenticated, service_role;

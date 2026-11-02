@@ -108,6 +108,38 @@ class Suite:
         migration_versions = set(sql("SELECT version FROM supabase_migrations.schema_migrations" ).splitlines())
         require({"20261102000100", "20261102000200"}.issubset(migration_versions),
                 "CP-006A/CP-006B migrations are not recorded as applied locally")
+        hosted_role_boundary = sql(
+            "SELECT (SELECT proowner='postgres'::regrole FROM pg_proc WHERE oid='app_private.current_identity_is_verified(boolean)'::regprocedure) AND "
+            "(SELECT proowner='postgres'::regrole FROM pg_proc WHERE oid='app_private.current_verified_email(boolean)'::regprocedure) AND "
+            "NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE p.prosecdef AND n.nspname IN ('public','app_private') AND "
+            "NOT coalesce(p.proconfig,ARRAY[]::text[]) @> ARRAY['search_path=\"\"']::text[]) AND "
+            "NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid = ANY(ARRAY["
+            "'public.create_couple_space(uuid)'::regprocedure,'public.ensure_account()'::regprocedure,"
+            "'public.account_context()'::regprocedure,'public.partner_link_context()'::regprocedure,"
+            "'public.issue_partner_invitation(uuid,uuid,bigint,text)'::regprocedure,"
+            "'public.accept_partner_invitation(uuid,text)'::regprocedure,"
+            "'public.revoke_partner_invitation(uuid,uuid)'::regprocedure,"
+            "'public.delete_bucket_list_item(uuid,uuid,bigint)'::regprocedure,"
+            "'public.delete_important_date(uuid,uuid,bigint)'::regprocedure,"
+            "'public.delete_plan_task(uuid,uuid,bigint)'::regprocedure,"
+            "'public.delete_plan(uuid,uuid,bigint)'::regprocedure]) "
+            "AND p.proowner <> 'twogethera_membership_owner'::regrole) AND "
+            "has_function_privilege('twogethera_membership_owner','app_private.current_identity_is_verified(boolean)','EXECUTE') AND "
+            "has_function_privilege('twogethera_membership_owner','app_private.current_verified_email(boolean)','EXECUTE') AND "
+            "to_regprocedure('extensions.gen_random_bytes(integer)') IS NOT NULL AND "
+            "to_regprocedure('extensions.hmac(bytea,bytea,text)') IS NOT NULL AND "
+            "to_regprocedure('extensions.digest(bytea,text)') IS NOT NULL AND "
+            "(SELECT NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls AND NOT rolinherit "
+            "FROM pg_roles WHERE rolname='twogethera_membership_owner') AND "
+            "NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE "
+            "(roleid='twogethera_membership_owner'::regrole AND member <> 'postgres'::regrole) OR member='twogethera_membership_owner'::regrole) AND "
+            "NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.contype='f' AND c.conrelid IN "
+            "('public.couple_memberships'::regclass,'app_private.couple_create_receipts'::regclass,"
+            "'app_private.partner_invitations'::regclass,'app_private.partner_invitation_receipts'::regclass,"
+            "'app_private.partner_invitation_limits'::regclass) AND c.confrelid='auth.users'::regclass)")
+        require(hosted_role_boundary == "t",
+                "managed-role Auth bridge or owner role catalog boundary is incorrect")
         health, _ = http(API + "/auth/v1/health")
         require(health == 200, "local Auth health endpoint did not respond")
         require(sql("SELECT to_regclass('" + FIXTURE + "') IS NULL") == "t",

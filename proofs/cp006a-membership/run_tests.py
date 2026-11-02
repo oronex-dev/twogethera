@@ -529,8 +529,13 @@ NOTIFY pgrst, 'reload schema';
             "(SELECT NOT rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication "
             "AND NOT rolbypassrls AND NOT rolinherit AND shobj_description(oid,'pg_authid')='twogethera:cp006a:membership-owner:v1' "
             "FROM pg_roles WHERE rolname='twogethera_membership_owner') AND "
-            "NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid='twogethera_membership_owner'::regrole "
-            "OR member='twogethera_membership_owner'::regrole)")
+            "NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE "
+            "(roleid='twogethera_membership_owner'::regrole AND member <> 'postgres'::regrole) "
+            "OR member='twogethera_membership_owner'::regrole) AND "
+            "(SELECT proowner='postgres'::regrole FROM pg_proc WHERE oid='app_private.current_identity_is_verified(boolean)'::regprocedure) AND "
+            "NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.contype='f' AND c.conrelid IN "
+            "('public.couple_memberships'::regclass,'app_private.couple_create_receipts'::regclass) "
+            "AND c.confrelid='auth.users'::regclass)")
         require(checks == "t", "RLS/grants/function-owner catalog boundary failed")
         code, body = http(API + "/rest/v1/rpc/can_read_couple", "POST", {"p_couple_id": c},
                           {"apikey": self.anon, "Authorization": "Bearer " + self.users["b"]["token"],

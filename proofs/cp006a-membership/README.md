@@ -19,14 +19,14 @@ CP-006A.1 additionally requires Python `cryptography` locally to create a short-
 
 ## Scope and limits
 
-The migration contains only couple spaces, memberships, a private creation idempotency receipt, an Auth-owned verified-identity check, RLS, and an atomic `create_couple_space` command. Invitation token generation/acceptance, unlink UI/API, archive retention, product tables, Storage, Realtime and Flutter integration are out of scope. A test-only planner-record table is not an application feature. No hosted project is linked.
+The migration contains only couple spaces, memberships, a private creation idempotency receipt, a narrow postgres-owned verified-identity bridge, RLS, and an atomic `create_couple_space` command. The bridge returns only the signed-in verified subject; application-owner tables do not reference `auth.users` directly. Invitation token generation/acceptance, unlink UI/API, archive retention, product tables, Storage, Realtime and Flutter integration are out of scope. A test-only planner-record table is not an application feature.
 
-This first migration is exercised on a clean isolated database. There is no prior root application migration to upgrade from, so an N-1 populated upgrade cannot yet be claimed. The Auth-owned column-read bridge, role ownership, and local role grants need a managed-Supabase portability review before production promotion.
+This first migration is exercised on a clean isolated database. There is no prior root application migration to upgrade from, so an N-1 populated upgrade cannot yet be claimed. Managed-role compatibility was reviewed during CP-009; hosted staging application and privilege validation remain necessary before production promotion.
 
 ## CP-006A.1 assurance additions
 
 - JWT identity validation is null-safe for a missing role claim; the no-role signed-token and direct identity-gate regressions must fail closed.
-- The owner-role migration guard rejects unsafe attributes, either direction of role membership, and an unexpected ownership marker.
+- The owner-role migration guard rejects unsafe attributes, API-role membership in either direction, non-postgres role membership, and an unexpected ownership marker. Managed `postgres` alone receives membership so migrations can `SET ROLE` for DDL.
 - Membership states are limited to `active` and `revoked`; the server assigns `revoked_at`. No archive membership entitlement, unlink workflow, invite acceptance, or replacement partner is implemented.
 - A draft must retain exactly one active seat-1 creator. Six concurrent create HTTP requests are released together; the suite observes one transaction in the test sleep gate and five PostgreSQL lock waits, expects exactly one success and five conflict responses, and checks final space/member/receipt counts.
 - The injected receipt failure asserts an exact SQLSTATE and message and compares all in-scope persistent row counts before/after.

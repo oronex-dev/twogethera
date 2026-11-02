@@ -263,10 +263,6 @@ GRANT INSERT (couple_id,plan_id,title,sort_order)
 GRANT UPDATE (plan_id,title,is_completed,sort_order)
   ON public.plan_tasks TO authenticated;
 
-ALTER FUNCTION public.delete_bucket_list_item(uuid,uuid,bigint) OWNER TO twogethera_membership_owner;
-ALTER FUNCTION public.delete_important_date(uuid,uuid,bigint) OWNER TO twogethera_membership_owner;
-ALTER FUNCTION public.delete_plan_task(uuid,uuid,bigint) OWNER TO twogethera_membership_owner;
-ALTER FUNCTION public.delete_plan(uuid,uuid,bigint) OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION public.delete_bucket_list_item(uuid,uuid,bigint) FROM PUBLIC, anon, service_role;
 REVOKE ALL ON FUNCTION public.delete_important_date(uuid,uuid,bigint) FROM PUBLIC, anon, service_role;
 REVOKE ALL ON FUNCTION public.delete_plan_task(uuid,uuid,bigint) FROM PUBLIC, anon, service_role;
