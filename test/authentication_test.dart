@@ -151,7 +151,7 @@ void main() {
     expect(valid, isNotNull);
     expect(
       valid!.authCallbackUrl,
-      Uri.parse('https://beta.twogethera.com/auth/callback'),
+      Uri.parse('https://beta.twogethera.com/#/auth/callback'),
     );
     expect(valid.toString(), isNot(contains('sb_publishable_')));
     expect(

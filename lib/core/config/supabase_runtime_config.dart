@@ -25,7 +25,10 @@ class SupabaseRuntimeConfig {
   final String developmentSchema;
 
   bool get isDevelopment => environment == BackendEnvironment.development;
-  Uri? get authCallbackUrl => webBaseUrl?.resolve('/auth/callback');
+
+  /// The app uses Flutter's hash URL strategy, so the callback route belongs
+  /// in the fragment rather than at a server path on the web origin.
+  Uri? get authCallbackUrl => webBaseUrl?.resolve('/#/auth/callback');
 
   static SupabaseRuntimeConfig? fromEnvironment({
     bool debug = kDebugMode,

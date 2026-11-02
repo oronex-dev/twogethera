@@ -5,9 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../../core/config/supabase_runtime_config.dart';
 import '../application/auth_controller.dart';
 import 'callback_location.dart';
+import 'callback_query_parameters.dart';
 
 final callbackLocationScrubberProvider = Provider<void Function(String)>(
   (ref) => scrubCallbackLocation,
+);
+final callbackBrowserUriProvider = Provider<Uri?>(
+  (ref) => readCallbackBrowserUri(),
 );
 
 /// Local hash-link ingress only. PKCE codes, implicit access tokens and OS mail
@@ -28,7 +32,10 @@ class _AuthCallbackScreenState extends ConsumerState<AuthCallbackScreen> {
 
   Future<void> _consume() async {
     if (!mounted) return;
-    final parameters = widget.uri.queryParametersAll;
+    final parameters = callbackQueryParameters(
+      widget.uri,
+      browserUri: ref.read(callbackBrowserUriProvider),
+    );
     final recovery = parameters['type']?.singleOrNull == 'recovery';
     final target = recovery ? '/auth/recovery' : '/auth/verify';
     // Do not send anything until the address has been replaced. Unsupported

@@ -317,6 +317,65 @@ void main() {
     },
   );
   testWidgets(
+    'callback accepts Supabase query before the hash route and scrubs it first',
+    (tester) async {
+      final fake = ExperienceFake();
+      final c = ProviderContainer(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(fake),
+          localAuthConfigProvider.overrideWithValue(config()),
+          callbackBrowserUriProvider.overrideWithValue(
+            Uri.parse(
+              'https://beta.twogethera.com/?type=signup&token_hash=pkce_${'a' * 56}#/auth/callback',
+            ),
+          ),
+          callbackLocationScrubberProvider.overrideWithValue(
+            (_) => fake.order.add('scrub'),
+          ),
+        ],
+      );
+      addTearDown(c.dispose);
+      addTearDown(fake.dispose);
+      await show(tester, c, '/auth/callback');
+      expect(fake.order, ['scrub', 'clear', 'verify']);
+      expect(c.read(authControllerProvider).phase, AuthPhase.authenticated);
+      expect(
+        c.read(appRouterProvider).routeInformationProvider.value.uri.toString(),
+        '/account',
+      );
+    },
+  );
+  testWidgets(
+    'hash-route recovery callback reads outer token_hash and enters recovery only',
+    (tester) async {
+      final fake = ExperienceFake();
+      final c = ProviderContainer(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(fake),
+          localAuthConfigProvider.overrideWithValue(config()),
+          callbackBrowserUriProvider.overrideWithValue(
+            Uri.parse(
+              'https://beta.twogethera.com/?type=recovery&token_hash=pkce_${'b' * 56}#/auth/callback',
+            ),
+          ),
+          callbackLocationScrubberProvider.overrideWithValue(
+            (_) => fake.order.add('scrub'),
+          ),
+        ],
+      );
+      addTearDown(c.dispose);
+      addTearDown(fake.dispose);
+      await show(tester, c, '/auth/callback');
+      expect(fake.order, ['scrub', 'clear', 'verify']);
+      expect(c.read(authControllerProvider).phase, AuthPhase.recovering);
+      expect(
+        c.read(appRouterProvider).routeInformationProvider.value.uri.toString(),
+        '/auth/recovery',
+      );
+      expect(key('account-verified'), findsNothing);
+    },
+  );
+  testWidgets(
     'unsupported callback fails safely and removes query from route',
     (tester) async {
       final fake = ExperienceFake();
