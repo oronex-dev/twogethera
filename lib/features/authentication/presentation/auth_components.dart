@@ -261,6 +261,14 @@ String? validateLocalEmail(String? value) {
   return null;
 }
 
+String? validateAccountEmail(String? value, {required bool localOnly}) {
+  if (localOnly) return validateLocalEmail(value);
+  final email = value?.trim() ?? '';
+  return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)
+      ? null
+      : 'Enter a valid email address.';
+}
+
 String? validateNewPassword(String? value) => (value?.length ?? 0) < 16
     ? 'Use at least 16 characters for your password.'
     : null;
@@ -268,6 +276,7 @@ String? validateNewPassword(String? value) => (value?.length ?? 0) < 16
 Widget authEmailField(
   TextEditingController controller, {
   required String fieldKey,
+  bool localOnly = true,
   bool enabled = true,
   TextInputAction action = TextInputAction.next,
   VoidCallback? onSubmitted,
@@ -281,7 +290,7 @@ Widget authEmailField(
   enableSuggestions: false,
   autofillHints: null,
   enableIMEPersonalizedLearning: false,
-  validator: validateLocalEmail,
+  validator: (value) => validateAccountEmail(value, localOnly: localOnly),
   onFieldSubmitted: (_) => onSubmitted?.call(),
   decoration: const InputDecoration(
     labelText: 'Email address',

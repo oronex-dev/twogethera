@@ -17,17 +17,16 @@ class AuthFailure implements Exception {
   final AuthProblem problem;
   String get message => switch (problem) {
     AuthProblem.invalidCredentials =>
-      'Sign-in could not be completed. Check your synthetic credentials.',
+      'Sign-in could not be completed. Check your email and password.',
     AuthProblem.unavailable =>
-      'The local backend is unavailable. Try again when it is running.',
-    AuthProblem.denied =>
-      'This account cannot access the local proof. No shared data was loaded.',
+      'Authentication is temporarily unavailable. Try again shortly.',
+    AuthProblem.denied => 'This account cannot access shared data. Contact support if you think this is an error.',
     AuthProblem.expired =>
       'Local access expired. Refresh explicitly or sign in again.',
     AuthProblem.configuration => 'Local authentication is disabled or not configured for this debug build.',
-    AuthProblem.emailUnconfirmed => 'Confirm the account using the local development mailbox before signing in.',
+    AuthProblem.emailUnconfirmed => 'Confirm your email before signing in.',
     AuthProblem.invalidLink =>
-      'This local verification link is invalid, expired, or already used.',
+      'This verification link is invalid, expired, or already used.',
     AuthProblem.recoveryRequired =>
       'Complete password recovery, then sign in again.',
     AuthProblem.passwordRejected => 'The password change could not be completed. Use a new password of at least 16 characters.',

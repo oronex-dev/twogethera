@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:twogethera/app/routing/app_router.dart';
 import 'package:twogethera/app/twogethera_app.dart';
 import 'package:twogethera/core/config/local_auth_config.dart';
+import 'package:twogethera/core/config/supabase_runtime_config.dart';
 import 'package:twogethera/features/authentication/application/auth_controller.dart';
 import 'package:twogethera/features/authentication/data/local_auth_clients.dart';
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
@@ -137,6 +138,77 @@ void main() {
       )!;
       expect(value.endpoint.host, android ? '10.0.2.2' : '127.0.0.1');
       expect(value.toString(), isNot(contains(value.publicKey)));
+    }
+  });
+  test('hosted config requires HTTPS origins and a client-only key', () {
+    final publishableKey = 'sb_publishable_${List.filled(40, 'p').join()}';
+    final valid = SupabaseRuntimeConfig.parseHosted(
+      environment: BackendEnvironment.production,
+      url: 'https://project-ref.supabase.co',
+      publishableKey: publishableKey,
+      webBaseUrl: 'https://beta.twogethera.com',
+    );
+    expect(valid, isNotNull);
+    expect(
+      valid!.authCallbackUrl,
+      Uri.parse('https://beta.twogethera.com/auth/callback'),
+    );
+    expect(valid.toString(), isNot(contains('sb_publishable_')));
+    expect(
+      SupabaseRuntimeConfig.parseHosted(
+        environment: BackendEnvironment.staging,
+        url: 'https://project-ref.supabase.co',
+        publishableKey: publicFixtureKey('anon'),
+        webBaseUrl: 'https://staging.twogethera.com/',
+      ),
+      isNotNull,
+    );
+    for (final invalid in [
+      (
+        'http://project-ref.supabase.co',
+        'https://beta.twogethera.com',
+        publishableKey,
+      ),
+      (
+        'https://localhost:54321',
+        'https://beta.twogethera.com',
+        publishableKey,
+      ),
+      (
+        'https://project-ref.supabase.co/path',
+        'https://beta.twogethera.com',
+        publishableKey,
+      ),
+      (
+        'https://project-ref.supabase.co',
+        'http://beta.twogethera.com',
+        publishableKey,
+      ),
+      (
+        'https://project-ref.supabase.co',
+        'https://beta.twogethera.com/path',
+        publishableKey,
+      ),
+      (
+        'https://project-ref.supabase.co',
+        'https://beta.twogethera.com',
+        'sb_secret_${List.filled(40, 's').join()}',
+      ),
+      (
+        'https://project-ref.supabase.co',
+        'https://beta.twogethera.com',
+        publicFixtureKey('service_role'),
+      ),
+    ]) {
+      expect(
+        SupabaseRuntimeConfig.parseHosted(
+          environment: BackendEnvironment.production,
+          url: invalid.$1,
+          webBaseUrl: invalid.$2,
+          publishableKey: invalid.$3,
+        ),
+        isNull,
+      );
     }
   });
   test('memory storage is per-instance and clears without disk', () async {

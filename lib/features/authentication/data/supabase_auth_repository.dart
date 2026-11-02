@@ -14,8 +14,14 @@ class SupabaseAuthRepository
         PartnerInvitationRepository,
         SharedPlannerRepository,
         DashboardPreferencesRepository {
-  SupabaseAuthRepository({required this._createClients});
+  SupabaseAuthRepository({
+    required this._createClients,
+    this.allowRealAccounts = false,
+    this.emailRedirectTo,
+  });
   final LocalAuthClients Function() _createClients;
+  final bool allowRealAccounts;
+  final String? emailRedirectTo;
   final _changes = StreamController<AuthSignal>.broadcast(sync: true);
   LocalAuthClients? _clients;
   StreamSubscription<AuthState>? _subscription;
@@ -65,7 +71,8 @@ class SupabaseAuthRepository
   @override
   Future<void> signIn(String email, String password) async {
     await _discard(AuthSignal.cleared);
-    if (!email.endsWith('@example.invalid')) {
+    if (!allowRealAccounts &&
+        !email.toLowerCase().endsWith('@example.invalid')) {
       throw const AuthFailure(AuthProblem.invalidCredentials);
     }
     final clients = _open();
@@ -205,7 +212,8 @@ class SupabaseAuthRepository
   }
 
   void _synthetic(String email) {
-    if (!email.endsWith('@example.invalid')) {
+    if (!allowRealAccounts &&
+        !email.toLowerCase().endsWith('@example.invalid')) {
       throw const AuthFailure(AuthProblem.invalidCredentials);
     }
   }
@@ -240,6 +248,7 @@ class SupabaseAuthRepository
           .signUp(
             email: email,
             password: password,
+            emailRedirectTo: emailRedirectTo,
             data: name == null ? null : {'display_name': name},
           )
           .timeout(const Duration(seconds: 8));
@@ -266,7 +275,11 @@ class SupabaseAuthRepository
     final version = _generation;
     try {
       await clients.auth
-          .resend(type: OtpType.signup, email: email)
+          .resend(
+            type: OtpType.signup,
+            email: email,
+            emailRedirectTo: emailRedirectTo,
+          )
           .timeout(const Duration(seconds: 8));
       _current(clients, version);
     } on AuthFailure {
@@ -286,7 +299,7 @@ class SupabaseAuthRepository
     final version = _generation;
     try {
       await clients.auth
-          .resetPasswordForEmail(email)
+          .resetPasswordForEmail(email, redirectTo: emailRedirectTo)
           .timeout(const Duration(seconds: 8));
       _current(clients, version);
     } on AuthFailure {
@@ -305,14 +318,21 @@ class SupabaseAuthRepository
     final version = _generation;
     final uri = Uri.tryParse(link.trim());
     final type = recovery ? 'recovery' : 'signup';
+    final trustedOrigin = allowRealAccounts
+        ? uri != null &&
+              uri.scheme == 'https' &&
+              uri.origin == clients.endpoint.origin
+        : uri != null &&
+              uri.scheme == 'http' &&
+              {'127.0.0.1', 'localhost', '10.0.2.2'}.contains(uri.host);
     if (uri == null ||
-        uri.scheme != 'http' ||
-        !{'127.0.0.1', 'localhost', '10.0.2.2'}.contains(uri.host) ||
+        !trustedOrigin ||
         uri.port != clients.endpoint.port ||
         uri.path != '/auth/v1/verify' ||
         uri.userInfo.isNotEmpty ||
         uri.hasFragment ||
         uri.queryParameters['type'] != type ||
+        uri.queryParametersAll.length != 2 ||
         link.length > 8192) {
       throw const AuthFailure(AuthProblem.invalidLink);
     }

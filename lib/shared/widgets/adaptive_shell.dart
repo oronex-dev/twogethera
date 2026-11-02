@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/design_tokens.dart';
+import '../../features/authentication/application/auth_controller.dart';
 import 'together_mark.dart';
 
-class AdaptiveShell extends StatelessWidget {
+class AdaptiveShell extends ConsumerWidget {
   const AdaptiveShell({required this.path, required this.child, super.key});
   final String path;
   final Widget child;
@@ -19,7 +21,9 @@ class AdaptiveShell extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final authenticated =
+        ref.watch(authControllerProvider).phase == AuthPhase.authenticated;
     final width = MediaQuery.sizeOf(context).width;
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
     final desktop = width >= AppLayout.desktop;
@@ -47,6 +51,8 @@ class AdaptiveShell extends StatelessWidget {
               ? 'Appearance'
               : path == '/planner'
               ? 'Shared planner'
+              : path == '/search'
+              ? 'Search'
               : desktop
               ? (path == '/studio' ? 'Visual studio' : 'Your space')
               : 'Twogethera',
@@ -59,6 +65,16 @@ class AdaptiveShell extends StatelessWidget {
               )
             : null,
         actions: [
+          IconButton(
+            tooltip: authenticated ? 'Account' : 'Sign in',
+            onPressed: () =>
+                context.go(authenticated ? '/account' : '/auth/welcome'),
+            icon: Icon(
+              authenticated
+                  ? Icons.account_circle_outlined
+                  : Icons.login_rounded,
+            ),
+          ),
           if (path != '/settings')
             IconButton(
               tooltip: 'Appearance settings',

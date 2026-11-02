@@ -2,37 +2,42 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/config/local_auth_config.dart';
+import '../../../core/config/supabase_runtime_config.dart';
 import '../application/auth_controller.dart';
 import 'auth_components.dart';
 
-class AuthWelcomeScreen extends StatelessWidget {
+class AuthWelcomeScreen extends ConsumerWidget {
   const AuthWelcomeScreen({super.key});
   @override
-  Widget build(BuildContext context) => AuthFrame(
-    title: 'Your story, together.',
-    description: 'Make room for the moments that matter.',
-    onBack: () => context.go('/'),
-    backLabel: 'Back to preview',
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        FilledButton(
-          onPressed: () => context.go('/auth/local'),
-          child: const Text('Sign in'),
-        ),
-        const SizedBox(height: 12),
-        OutlinedButton(
-          onPressed: () => context.go('/auth/register'),
-          child: const Text('Create account'),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          'Explore the authentication preview with a local test account. Partner spaces and shared content are not connected yet.',
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final config = ref.watch(supabaseRuntimeConfigProvider);
+    return AuthFrame(
+      title: 'Your story, together.',
+      description: 'Make room for the moments that matter.',
+      onBack: () => context.go('/'),
+      backLabel: 'Back to preview',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          FilledButton(
+            onPressed: () => context.go('/auth/local'),
+            child: const Text('Sign in'),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () => context.go('/auth/register'),
+            child: const Text('Create account'),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            config?.isDevelopment == true
+                ? 'Explore the authentication preview with a local test account. Your shared space stays private.'
+                : 'Sign in or create an account to continue to your private shared space.',
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class LocalAuthScreen extends ConsumerStatefulWidget {
@@ -78,7 +83,8 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
     final state = ref.watch(authControllerProvider);
     final busy =
         state.phase == AuthPhase.loading || state.phase == AuthPhase.refreshing;
-    final configured = ref.watch(localAuthConfigProvider) != null;
+    final config = ref.watch(supabaseRuntimeConfigProvider);
+    final configured = config != null;
     return AuthFrame(
       title: 'Welcome back.',
       description: 'A quiet moment to pick up where you left off.',
@@ -95,6 +101,7 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
                 _email,
                 fieldKey: 'auth-email',
                 enabled: !busy && configured,
+                localOnly: config?.isDevelopment ?? true,
               ),
               const SizedBox(height: 16),
               AuthPasswordField(
@@ -118,14 +125,20 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
               FilledButton(
                 onPressed: busy || !configured ? null : _submit,
                 child: Text(
-                  busy ? 'Checking local access…' : 'Sign in locally',
+                  busy
+                      ? (config?.isDevelopment == true
+                            ? 'Checking local access…'
+                            : 'Signing in…')
+                      : (config?.isDevelopment == true
+                            ? 'Sign in locally'
+                            : 'Sign in'),
                 ),
               ),
               if (!configured)
                 const Padding(
                   padding: EdgeInsets.only(top: 16),
                   child: Text(
-                    'Local authentication is unavailable in this build. Open a configured development preview to try it.',
+                    'Authentication is not configured for this build. Contact the app administrator.',
                   ),
                 ),
               AuthFeedback(state: state),
@@ -160,6 +173,8 @@ class LocalAccountScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(authControllerProvider);
+    final isDevelopment =
+        ref.watch(supabaseRuntimeConfigProvider)?.isDevelopment == true;
     final account = state.phase == AuthPhase.authenticated
         ? state.context
         : null;
@@ -174,9 +189,9 @@ class LocalAccountScreen extends ConsumerWidget {
           if (account != null) ...[
             const Icon(Icons.verified_user_outlined, size: 36),
             const SizedBox(height: 16),
-            const Text(
-              'Local account verified',
-              key: ValueKey('account-verified'),
+            Text(
+              isDevelopment ? 'Local account verified' : 'Account verified',
+              key: const ValueKey('account-verified'),
             ),
             const SizedBox(height: 16),
             if (account.displayName != null)
@@ -187,9 +202,9 @@ class LocalAccountScreen extends ConsumerWidget {
             if (account.email != null) Text(account.email!),
             const SizedBox(height: 16),
             Text(
-              account.spaces.isEmpty
-                  ? 'Your account is ready. Partner linking is coming in a later milestone.'
-                  : 'Your space access is confirmed. Shared content is not connected yet.',
+              account.spaces.any((space) => space.state == 'paired')
+                  ? 'Your shared space is ready. Open your planner to see what you are building together.'
+                  : 'Link with your partner to open your shared planner.',
             ),
             const SizedBox(height: 24),
             FilledButton(
@@ -310,9 +325,10 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(authControllerProvider);
+    final config = ref.watch(supabaseRuntimeConfigProvider);
     final busy =
         state.phase == AuthPhase.loading || state.phase == AuthPhase.refreshing;
-    final configured = ref.watch(localAuthConfigProvider) != null;
+    final configured = config != null;
     final enabled = configured && !busy;
     final ready = widget.recovery && state.phase == AuthPhase.recovering;
     final registration = widget.registration;
@@ -331,7 +347,11 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
           ? 'A few details, and you’re on your way.'
           : widget.recovery
           ? 'We’ll send a recovery message if your address is eligible.'
-          : 'Open the local development mailbox and use the newest confirmation link. Expired or used links cannot be reused.',
+          : registration
+          ? 'We’ll send a confirmation link to your email. Confirm it to finish creating your account.'
+          : config?.isDevelopment == true
+          ? 'Open the local development mailbox and use the newest confirmation link. Expired or used links cannot be reused.'
+          : 'Open the newest confirmation link in your email. Expired or used links cannot be reused.',
       onBack: _back,
       child: AutofillGroup(
         onDisposeAction: AutofillContextAction.cancel,
@@ -340,7 +360,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
           children: [
             if (!configured)
               const Text(
-                'Local authentication is unavailable in this build. Use a configured development preview.',
+                'Authentication is not configured for this build. Contact the app administrator.',
               ),
             Form(
               key: _form,
@@ -373,6 +393,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
                       _email,
                       fieldKey: 'lifecycle-email',
                       enabled: enabled,
+                      localOnly: config?.isDevelopment ?? true,
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -427,7 +448,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
               const Text(
                 'After a reset, sign in with your new password. If the request is interrupted, the password may already have changed; try signing in or request a fresh recovery link.',
               ),
-            ] else if (!registration) ...[
+            ] else if (!registration && config?.isDevelopment == true) ...[
               const SizedBox(height: 28),
               const Divider(),
               const SizedBox(height: 16),

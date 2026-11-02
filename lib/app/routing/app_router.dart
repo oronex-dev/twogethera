@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -22,7 +21,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     refreshListenable: refresh,
     redirect: (context, route) {
-      if (!kDebugMode) return null;
       if (route.uri.path == '/auth/callback') return null;
       final phase = ref.read(authControllerProvider).phase;
       final authenticated = phase == AuthPhase.authenticated;
@@ -49,53 +47,50 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      if (kDebugMode) ...[
-        GoRoute(
-          path: '/auth/welcome',
-          builder: (context, state) => const AuthWelcomeScreen(),
+      GoRoute(
+        path: '/auth/welcome',
+        builder: (context, state) => const AuthWelcomeScreen(),
+      ),
+      GoRoute(
+        path: '/auth/callback',
+        builder: (context, state) => AuthCallbackScreen(uri: state.uri),
+      ),
+      GoRoute(
+        path: '/auth/register',
+        builder: (context, state) =>
+            const LocalLifecycleScreen(registration: true),
+      ),
+      GoRoute(
+        path: '/auth/verify',
+        builder: (context, state) => const LocalLifecycleScreen(),
+      ),
+      GoRoute(
+        path: '/auth/recovery',
+        builder: (context, state) => const LocalLifecycleScreen(recovery: true),
+      ),
+      GoRoute(
+        path: '/auth/local',
+        builder: (context, state) => LocalAuthScreen(
+          nextRoute: switch (state.uri.queryParameters['next']) {
+            '/partner' => '/partner',
+            '/planner' => '/planner',
+            '/search' => '/search',
+            _ => null,
+          },
         ),
-        GoRoute(
-          path: '/auth/callback',
-          builder: (context, state) => AuthCallbackScreen(uri: state.uri),
-        ),
-        GoRoute(
-          path: '/auth/register',
-          builder: (context, state) =>
-              const LocalLifecycleScreen(registration: true),
-        ),
-        GoRoute(
-          path: '/auth/verify',
-          builder: (context, state) => const LocalLifecycleScreen(),
-        ),
-        GoRoute(
-          path: '/auth/recovery',
-          builder: (context, state) =>
-              const LocalLifecycleScreen(recovery: true),
-        ),
-        GoRoute(
-          path: '/auth/local',
-          builder: (context, state) => LocalAuthScreen(
-            nextRoute: switch (state.uri.queryParameters['next']) {
-              '/partner' => '/partner',
-              '/planner' => '/planner',
-              '/search' => '/search',
-              _ => null,
-            },
-          ),
-        ),
-        GoRoute(
-          path: '/account',
-          builder: (context, state) => const LocalAccountScreen(),
-        ),
-        GoRoute(
-          path: '/partner',
-          builder: (context, state) => const PartnerLinkingScreen(),
-        ),
-        GoRoute(
-          path: '/planner',
-          builder: (context, state) => const SharedPlannerScreen(),
-        ),
-      ],
+      ),
+      GoRoute(
+        path: '/account',
+        builder: (context, state) => const LocalAccountScreen(),
+      ),
+      GoRoute(
+        path: '/partner',
+        builder: (context, state) => const PartnerLinkingScreen(),
+      ),
+      GoRoute(
+        path: '/planner',
+        builder: (context, state) => const SharedPlannerScreen(),
+      ),
       ShellRoute(
         builder: (context, state, child) =>
             AdaptiveShell(path: state.uri.path, child: child),

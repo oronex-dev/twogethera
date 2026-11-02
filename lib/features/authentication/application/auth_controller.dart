@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/config/local_auth_config.dart';
+import '../../../core/config/supabase_runtime_config.dart';
 import '../data/local_auth_clients.dart';
 import '../data/supabase_auth_repository.dart';
 import '../domain/auth_repository.dart';
@@ -32,19 +32,22 @@ class AuthViewState {
 }
 
 final authClientFactoryProvider = Provider<LocalAuthClients Function()>((ref) {
-  final config = ref.watch(localAuthConfigProvider);
+  final config = ref.watch(supabaseRuntimeConfigProvider);
   return () {
     if (config == null) throw const AuthFailure(AuthProblem.configuration);
     return LocalAuthClients(
       url: config.endpoint.toString(),
-      publicKey: config.publicKey,
-      schema: config.dataSchema,
+      publicKey: config.publishableKey,
+      schema: config.isDevelopment ? config.developmentSchema : 'public',
     );
   };
 });
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  final config = ref.watch(supabaseRuntimeConfigProvider);
   final repository = SupabaseAuthRepository(
     createClients: ref.watch(authClientFactoryProvider),
+    allowRealAccounts: config != null && !config.isDevelopment,
+    emailRedirectTo: config?.authCallbackUrl?.toString(),
   );
   ref.onDispose(() => unawaited(repository.dispose()));
   return repository;
@@ -138,27 +141,27 @@ class AuthController extends Notifier<AuthViewState> {
     return _lifecycle.accountContext();
   }, during: AuthPhase.refreshing);
 
-  Future<void> register(String email, String password, {String? displayName}) =>
-      _run(
-        () async {
-          if (displayName == null) {
-            await _lifecycle.register(email.trim(), password);
-          } else {
-            final repository = _lifecycle;
-            if (repository is! AuthExperienceRepository) {
-              throw const AuthFailure(AuthProblem.configuration);
-            }
-            await repository.registerProfile(
-              email.trim(),
-              password,
-              displayName,
-            );
-          }
-          return null;
-        },
-        success: AuthPhase.awaitingConfirmation,
-        notice: 'If the request is eligible, check the local development mailbox for confirmation.',
-      );
+  Future<void> register(
+    String email,
+    String password, {
+    String? displayName,
+  }) => _run(
+    () async {
+      if (displayName == null) {
+        await _lifecycle.register(email.trim(), password);
+      } else {
+        final repository = _lifecycle;
+        if (repository is! AuthExperienceRepository) {
+          throw const AuthFailure(AuthProblem.configuration);
+        }
+        await repository.registerProfile(email.trim(), password, displayName);
+      }
+      return null;
+    },
+    success: AuthPhase.awaitingConfirmation,
+    notice:
+        'If the request is eligible, check your email for a confirmation link.',
+  );
 
   Future<void> resendVerification(String email) => _run(
     () async {
@@ -170,7 +173,7 @@ class AuthController extends Notifier<AuthViewState> {
       return null;
     },
     success: AuthPhase.awaitingConfirmation,
-    notice: 'If the address is eligible, a new confirmation message will appear in the local development mailbox. Use the newest link.',
+    notice: 'If the address is eligible, a new confirmation message will be sent. Use the newest link.',
   );
 
   Future<void> requestRecovery(String email) => _run(
@@ -179,7 +182,8 @@ class AuthController extends Notifier<AuthViewState> {
       return null;
     },
     success: AuthPhase.recoveryRequested,
-    notice: 'If the address is eligible, a reset message will appear in the local development mailbox.',
+    notice:
+        'If the address is eligible, password reset instructions will be sent.',
   );
 
   Future<void> verifyLink(String link, {required bool recovery}) =>

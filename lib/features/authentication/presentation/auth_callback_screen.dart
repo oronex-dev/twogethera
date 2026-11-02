@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/config/local_auth_config.dart';
+import '../../../core/config/supabase_runtime_config.dart';
 import '../application/auth_controller.dart';
 import 'callback_location.dart';
 
@@ -34,7 +34,7 @@ class _AuthCallbackScreenState extends ConsumerState<AuthCallbackScreen> {
     // Do not send anything until the address has been replaced. Unsupported
     // input also takes this path and fails with the same sanitized link error.
     ref.read(callbackLocationScrubberProvider)(target);
-    final config = ref.read(localAuthConfigProvider);
+    final config = ref.read(supabaseRuntimeConfigProvider);
     final hash = parameters['token_hash']?.singleOrNull;
     final type = parameters['type']?.singleOrNull;
     final supported =
