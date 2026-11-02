@@ -36,10 +36,79 @@ printf '%s  %s\n' "$archive_sha256" "$archive" | sha256sum --check --status || {
 
 tar -xJf "$archive" -C "$workspace"
 export FLUTTER_ROOT="$workspace/flutter"
+git config --global --add safe.directory "$FLUTTER_ROOT"
 export PATH="$FLUTTER_ROOT/bin:$PATH"
 
-if [[ "$(flutter --version --machine | python3 -c 'import json,sys; print(json.load(sys.stdin)["frameworkVersion"])')" != "$flutter_version" ]]; then
-  printf '%s\n' 'Downloaded Flutter SDK version does not match the required version.' >&2
+version_stdout_file="$workspace/flutter-version.stdout"
+version_stderr_file="$workspace/flutter-version.stderr"
+version_command_status=0
+if flutter --version --machine >"$version_stdout_file" 2>"$version_stderr_file"; then
+  version_command_status=0
+else
+  version_command_status=$?
+fi
+version_output="$(cat "$version_stdout_file")"
+version_error="$(cat "$version_stderr_file")"
+
+if [[ "$version_command_status" -ne 0 ]]; then
+  printf 'Flutter SDK version command failed with exit status %s. Actual command output:\n' \
+    "$version_command_status" >&2
+  if [[ -n "$version_output" ]]; then
+    printf 'stdout:\n%s\n' "$version_output" >&2
+  else
+    printf 'stdout:\n%s\n' '[empty output]' >&2
+  fi
+  if [[ -n "$version_error" ]]; then
+    printf 'stderr:\n%s\n' "$version_error" >&2
+  else
+    printf 'stderr:\n%s\n' '[empty output]' >&2
+  fi
+  exit 4
+fi
+
+actual_version=''
+# Flutter can append its first-run analytics notice to the machine JSON on
+# stdout. Locate the JSON object but retain both complete streams for errors.
+if actual_version="$(python3 -c '
+import json
+import sys
+
+output = sys.stdin.read()
+decoder = json.JSONDecoder()
+for offset, character in enumerate(output):
+    if character != "{":
+        continue
+    try:
+        payload, _ = decoder.raw_decode(output[offset:])
+    except json.JSONDecodeError:
+        continue
+    version = payload.get("frameworkVersion") if isinstance(payload, dict) else None
+    if isinstance(version, str):
+        print(version)
+        raise SystemExit(0)
+raise SystemExit(1)
+' <"$version_stdout_file" 2>/dev/null)"; then
+  :
+else
+  parser_status=$?
+  printf 'Flutter SDK version output was empty or invalid JSON (Flutter command exit status %s; JSON parser exit status %s). Actual command output:\n' \
+    "$version_command_status" "$parser_status" >&2
+  if [[ -n "$version_output" ]]; then
+    printf 'stdout:\n%s\n' "$version_output" >&2
+  else
+    printf 'stdout:\n%s\n' '[empty output]' >&2
+  fi
+  if [[ -n "$version_error" ]]; then
+    printf 'stderr:\n%s\n' "$version_error" >&2
+  else
+    printf 'stderr:\n%s\n' '[empty output]' >&2
+  fi
+  exit 4
+fi
+
+if [[ "$actual_version" != "$flutter_version" ]]; then
+  printf 'Flutter SDK version mismatch: expected %s, received %s.\n' \
+    "$flutter_version" "$actual_version" >&2
   exit 4
 fi
 
