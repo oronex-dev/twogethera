@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/config/supabase_runtime_config.dart';
 import '../application/auth_controller.dart';
+import '../../profile/presentation/profile_sections.dart';
 import 'auth_components.dart';
 
 class AuthWelcomeScreen extends ConsumerWidget {
@@ -199,6 +200,13 @@ class LocalAccountScreen extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (account != null) ...[
+            ProfileSections(account: account),
+            const SizedBox(height: 24),
+            Text(
+              'Account information',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
             const Icon(Icons.verified_user_outlined, size: 36),
             const SizedBox(height: 16),
             Text(

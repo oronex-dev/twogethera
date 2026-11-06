@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:supabase/supabase.dart';
 
@@ -6,6 +7,7 @@ import '../../dashboard/domain/dashboard_preferences.dart';
 import '../domain/auth_repository.dart';
 import '../../partner_linking/domain/partner_invitation_repository.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
+import '../../profile/domain/profile_repository.dart';
 import 'local_auth_clients.dart';
 
 class SupabaseAuthRepository
@@ -13,7 +15,8 @@ class SupabaseAuthRepository
         AuthExperienceRepository,
         PartnerInvitationRepository,
         SharedPlannerRepository,
-        DashboardPreferencesRepository {
+        DashboardPreferencesRepository,
+        ProfileRepository {
   SupabaseAuthRepository({
     required this._createClients,
     this.allowRealAccounts = false,
@@ -425,10 +428,17 @@ class SupabaseAuthRepository
           ),
         );
       }
+      final profile = await clients.data
+          .from('user_profiles')
+          .select('display_name')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+      _current(clients, version);
       return AccountContext(
         userId: session.user.id,
         spaces: List.unmodifiable(spaces),
-        displayName: switch (session.user.userMetadata?['display_name']) {
+        displayName: switch (profile?['display_name'] ??
+            session.user.userMetadata?['display_name']) {
           final String value
               when value.trim().length >= 2 && value.trim().length <= 64 =>
             value.trim(),
@@ -452,6 +462,163 @@ class SupabaseAuthRepository
       throw const AuthFailure(AuthProblem.expired);
     } catch (_) {
       throw const AuthFailure(AuthProblem.unavailable);
+    }
+  }
+
+  @override
+  Future<UserProfile> loadMyProfile({
+    required String userId,
+    required String fallbackDisplayName,
+  }) async {
+    final clients = _authorizedClients();
+    if (clients.validSession().user.id != userId) {
+      throw const ProfileFailure();
+    }
+    try {
+      final row = await clients.data
+          .from('user_profiles')
+          .select('user_id,display_name,about,avatar_path,revision')
+          .eq('user_id', userId)
+          .maybeSingle();
+      clients.validSession();
+      if (row == null) {
+        return UserProfile(
+          userId: userId,
+          displayName: fallbackDisplayName,
+          about: '',
+          revision: 1,
+        );
+      }
+      if (row['user_id'] != userId) throw const ProfileFailure();
+      return UserProfile.fromJson(row);
+    } catch (_) {
+      throw const ProfileFailure();
+    }
+  }
+
+  @override
+  Future<PartnerProfile?> loadPartnerProfile() async {
+    final clients = _authorizedClients();
+    try {
+      final result = await clients.data.rpc('partner_profile');
+      clients.validSession();
+      if (result == null) return null;
+      if (result is! Map || result['display_name'] is! String) {
+        throw const ProfileFailure();
+      }
+      return PartnerProfile.fromJson(Map<String, dynamic>.from(result));
+    } catch (_) {
+      throw const ProfileFailure();
+    }
+  }
+
+  @override
+  Future<Uint8List?> downloadAvatar(String path) async {
+    final clients = _authorizedClients();
+    try {
+      clients.validSession();
+      final bytes = await clients.data.storage
+          .from('profile-photos')
+          .download(path);
+      clients.validSession();
+      return bytes;
+    } catch (_) {
+      throw const ProfileFailure();
+    }
+  }
+
+  @override
+  Future<UserProfile> saveMyProfile({
+    required String userId,
+    required String displayName,
+    required String about,
+    required String? avatarPath,
+  }) async {
+    final clients = _authorizedClients();
+    if (clients.validSession().user.id != userId) {
+      throw const ProfileFailure();
+    }
+    final normalizedName = displayName.trim();
+    final normalizedAbout = about.trim();
+    if (normalizedName.length < 2 ||
+        normalizedName.length > 64 ||
+        normalizedAbout.length > 280 ||
+        (avatarPath != null && avatarPath != '$userId/avatar')) {
+      throw const ProfileFailure();
+    }
+    final values = {
+      'display_name': normalizedName,
+      'about': normalizedAbout,
+      'avatar_path': avatarPath,
+    };
+    try {
+      final existing = await clients.data
+          .from('user_profiles')
+          .select('user_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+      final dynamic result = existing == null
+          ? await clients.data
+                .from('user_profiles')
+                .insert({'user_id': userId, ...values})
+                .select('user_id,display_name,about,avatar_path,revision')
+                .single()
+          : await clients.data
+                .from('user_profiles')
+                .update(values)
+                .eq('user_id', userId)
+                .select('user_id,display_name,about,avatar_path,revision')
+                .single();
+      clients.validSession();
+      if (result is! Map || result['user_id'] != userId) {
+        throw const ProfileFailure();
+      }
+      return UserProfile.fromJson(Map<String, dynamic>.from(result));
+    } catch (_) {
+      throw const ProfileFailure();
+    }
+  }
+
+  @override
+  Future<String> uploadMyAvatar({
+    required String userId,
+    required Uint8List bytes,
+  }) async {
+    final clients = _authorizedClients();
+    if (clients.validSession().user.id != userId ||
+        bytes.isEmpty ||
+        bytes.length > 5 * 1024 * 1024) {
+      throw const ProfileFailure();
+    }
+    final path = '$userId/avatar';
+    try {
+      await clients.data.storage
+          .from('profile-photos')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'image/png',
+              upsert: true,
+            ),
+          );
+      clients.validSession();
+      return path;
+    } catch (_) {
+      throw const ProfileFailure();
+    }
+  }
+
+  @override
+  Future<void> removeMyAvatar(String path) async {
+    final clients = _authorizedClients();
+    final userId = clients.validSession().user.id;
+    if (path != '$userId/avatar') throw const ProfileFailure();
+    try {
+      await clients.data.storage.from('profile-photos').remove([path]);
+      clients.validSession();
+    } catch (_) {
+      throw const ProfileFailure();
     }
   }
 
