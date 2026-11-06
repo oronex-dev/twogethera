@@ -4,67 +4,190 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme/design_tokens.dart';
 import '../../features/authentication/application/auth_controller.dart';
+import '../../features/shared_planner/application/shared_planner_controller.dart';
 import 'together_mark.dart';
 
+enum _UtilityDestination { studio, appearance }
+
 class AdaptiveShell extends ConsumerWidget {
-  const AdaptiveShell({required this.path, required this.child, super.key});
+  const AdaptiveShell({
+    required this.path,
+    required this.queryParameters,
+    required this.child,
+    super.key,
+  });
+
   final String path;
+  final Map<String, String> queryParameters;
   final Widget child;
-  static const paths = ['/', '/planner', '/search', '/studio', '/settings'];
-  static const labels = ['Home', 'Planner', 'Search', 'Studio', 'Appearance'];
-  static const icons = [
-    Icons.space_dashboard_outlined,
-    Icons.event_note_outlined,
-    Icons.search_rounded,
-    Icons.auto_awesome_outlined,
-    Icons.tune_rounded,
+
+  static const plannerPaths = [
+    '/',
+    '/planner?tab=0',
+    '/planner?tab=1',
+    '/planner?tab=2',
   ];
+  static const plannerLabels = [
+    'Summary',
+    'Bucket List',
+    'Important Dates',
+    'Plans & Calendar',
+    'Budget',
+  ];
+  static const compactLabels = [
+    'Summary',
+    'Bucket',
+    'Dates',
+    'Plans',
+    'Budget',
+  ];
+  static const plannerIcons = [
+    Icons.space_dashboard_outlined,
+    Icons.checklist_rounded,
+    Icons.cake_outlined,
+    Icons.event_note_outlined,
+    Icons.savings_outlined,
+  ];
+
+  int? get selectedIndex {
+    if (path == '/planner') {
+      final tab = int.tryParse(queryParameters['tab'] ?? '0') ?? 0;
+      return tab.clamp(0, 2) + 1;
+    }
+    return path == '/' ? 0 : null;
+  }
+
+  String get pageTitle => switch (path) {
+    '/planner' => switch (queryParameters['tab']) {
+      '1' => 'Important Dates',
+      '2' => 'Plans & Calendar',
+      _ => 'Bucket List',
+    },
+    '/search' => 'Search',
+    '/studio' => 'Design Studio',
+    '/settings' => 'Appearance',
+    _ => 'Summary',
+  };
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authenticated =
-        ref.watch(authControllerProvider).phase == AuthPhase.authenticated;
+    final auth = ref.watch(authControllerProvider);
+    final authenticated = auth.phase == AuthPhase.authenticated;
     final width = MediaQuery.sizeOf(context).width;
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
     final desktop = width >= AppLayout.desktop;
     final tablet = width >= AppLayout.tablet && !desktop;
     final drawer = width < AppLayout.tablet && largeText;
-    final selected = paths.indexOf(path).clamp(0, paths.length - 1);
-    void go(int index) => context.go(paths[index]);
+    final selected = selectedIndex;
+    final primaryRoute = selected != null;
+
+    void navigatePlanner(int index) {
+      if (index < 4) {
+        context.go(plannerPaths[index]);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Budget is planned for a later update.'),
+          ),
+        );
+      }
+    }
+
+    void navigateUtility(_UtilityDestination destination) {
+      context.go(switch (destination) {
+        _UtilityDestination.studio => '/studio',
+        _UtilityDestination.appearance => '/settings',
+      });
+    }
+
+    void backToSummary() {
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go('/');
+      }
+    }
+
     return Scaffold(
       drawer: drawer
           ? Drawer(
               child: SafeArea(
                 child: _Sidebar(
                   selected: selected,
-                  onSelect: (index) {
+                  onSelectPlanner: (index) {
                     Navigator.of(context).pop();
-                    go(index);
+                    navigatePlanner(index);
+                  },
+                  onSelectUtility: (destination) {
+                    Navigator.of(context).pop();
+                    navigateUtility(destination);
+                  },
+                  onBudget: () {
+                    Navigator.of(context).pop();
+                    navigatePlanner(4);
                   },
                 ),
               ),
             )
           : null,
       appBar: AppBar(
-        title: Text(
-          path == '/settings'
-              ? 'Appearance'
-              : path == '/planner'
-              ? 'Shared planner'
-              : path == '/search'
-              ? 'Search'
-              : desktop
-              ? (path == '/studio' ? 'Visual studio' : 'Your space')
-              : 'Twogethera',
-        ),
-        leading: path == '/settings'
-            ? IconButton(
-                tooltip: 'Back to home',
-                icon: const Icon(Icons.arrow_back_rounded),
-                onPressed: () => go(0),
+        leading: path == '/' && drawer
+            ? Builder(
+                builder: (context) => IconButton(
+                  tooltip: 'Open navigation menu',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                  icon: const Icon(Icons.menu_rounded),
+                ),
               )
-            : null,
+            : path == '/'
+            ? null
+            : IconButton(
+                tooltip: 'Back',
+                onPressed: backToSummary,
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+        title: Text(pageTitle),
         actions: [
+          IconButton(
+            tooltip: 'Go to Summary',
+            onPressed: () => context.go('/'),
+            icon: const TogetherMark(size: 38),
+          ),
+          IconButton(
+            tooltip: 'Search your shared planner',
+            onPressed: () => context.go('/search'),
+            icon: const Icon(Icons.search_rounded),
+          ),
+          if (path == '/planner')
+            IconButton(
+              tooltip: 'Refresh planner',
+              onPressed: () {
+                final couple = auth.context?.spaces
+                    .where((space) => space.state == 'paired')
+                    .firstOrNull;
+                if (couple != null) {
+                  ref
+                      .read(sharedPlannerControllerProvider.notifier)
+                      .load(couple.id);
+                }
+              },
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          PopupMenuButton<_UtilityDestination>(
+            tooltip: 'More options',
+            onSelected: navigateUtility,
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _UtilityDestination.studio,
+                child: Text('Design Studio'),
+              ),
+              PopupMenuItem(
+                value: _UtilityDestination.appearance,
+                child: Text('Appearance'),
+              ),
+            ],
+            icon: const Icon(Icons.more_horiz_rounded),
+          ),
           IconButton(
             tooltip: authenticated ? 'Account' : 'Sign in',
             onPressed: () =>
@@ -75,22 +198,23 @@ class AdaptiveShell extends ConsumerWidget {
                   : Icons.login_rounded,
             ),
           ),
-          if (path != '/settings')
-            IconButton(
-              tooltip: 'Appearance settings',
-              onPressed: () => go(paths.indexOf('/settings')),
-              icon: const Icon(Icons.tune_rounded),
-            ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpace.xs),
         ],
       ),
-      bottomNavigationBar: width < AppLayout.tablet && !largeText
+      bottomNavigationBar:
+          width < AppLayout.tablet && !largeText && primaryRoute
           ? NavigationBar(
               selectedIndex: selected,
-              onDestinationSelected: go,
+              onDestinationSelected: navigatePlanner,
               destinations: [
-                for (var i = 0; i < paths.length; i++)
-                  NavigationDestination(icon: Icon(icons[i]), label: labels[i]),
+                for (var i = 0; i < plannerLabels.length; i++)
+                  NavigationDestination(
+                    tooltip: i == 4
+                        ? 'Budget, planned for later'
+                        : plannerLabels[i],
+                    icon: Icon(plannerIcons[i]),
+                    label: compactLabels[i],
+                  ),
               ],
             )
           : null,
@@ -100,8 +224,13 @@ class AdaptiveShell extends ConsumerWidget {
           children: [
             if (desktop)
               SizedBox(
-                width: 236,
-                child: _Sidebar(selected: selected, onSelect: go),
+                width: 248,
+                child: _Sidebar(
+                  selected: selected,
+                  onSelectPlanner: navigatePlanner,
+                  onSelectUtility: navigateUtility,
+                  onBudget: () => navigatePlanner(4),
+                ),
               ),
             if (tablet)
               SingleChildScrollView(
@@ -112,18 +241,21 @@ class AdaptiveShell extends ConsumerWidget {
                   child: IntrinsicHeight(
                     child: NavigationRail(
                       selectedIndex: selected,
-                      onDestinationSelected: go,
+                      onDestinationSelected: navigatePlanner,
                       labelType: largeText
                           ? NavigationRailLabelType.none
                           : NavigationRailLabelType.all,
                       destinations: [
-                        for (var i = 0; i < paths.length; i++)
+                        for (var i = 0; i < plannerLabels.length; i++)
                           NavigationRailDestination(
+                            disabled: i == 4,
                             icon: Tooltip(
-                              message: labels[i],
-                              child: Icon(icons[i]),
+                              message: i == 4
+                                  ? 'Budget, planned for later'
+                                  : plannerLabels[i],
+                              child: Icon(plannerIcons[i]),
                             ),
-                            label: Text(labels[i]),
+                            label: Text(plannerLabels[i]),
                           ),
                       ],
                     ),
@@ -139,33 +271,51 @@ class AdaptiveShell extends ConsumerWidget {
 }
 
 class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.selected, required this.onSelect});
-  final int selected;
-  final ValueChanged<int> onSelect;
+  const _Sidebar({
+    required this.selected,
+    required this.onSelectPlanner,
+    required this.onSelectUtility,
+    required this.onBudget,
+  });
+
+  final int? selected;
+  final ValueChanged<int> onSelectPlanner;
+  final ValueChanged<_UtilityDestination> onSelectUtility;
+  final VoidCallback onBudget;
+
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
       border: Border(right: BorderSide(color: BrandColors.of(context).border)),
     ),
     child: ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(AppSpace.md),
       children: [
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: TogetherMark(size: 64),
+        Semantics(
+          button: true,
+          label: 'Twogethera Summary',
+          child: InkWell(
+            onTap: () => context.go('/'),
+            borderRadius: BorderRadius.circular(18),
+            child: const Padding(
+              padding: EdgeInsets.all(AppSpace.xs),
+              child: Row(
+                children: [
+                  TogetherMark(size: 48),
+                  SizedBox(width: AppSpace.sm),
+                  Expanded(child: Text('Twogethera')),
+                ],
+              ),
+            ),
+          ),
         ),
-        Text('Twogethera', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        Text(
-          'A life, beautifully shared.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 40),
-        for (var i = 0; i < AdaptiveShell.paths.length; i++)
+        const SizedBox(height: AppSpace.lg),
+        for (var i = 0; i < AdaptiveShell.plannerLabels.length; i++)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: AppSpace.xs),
             child: ListTile(
-              selected: selected == i,
+              selected: i == selected,
+              enabled: i != 4,
               selectedTileColor: Theme.of(context)
                   .colorScheme
                   .secondaryContainer,
@@ -173,13 +323,31 @@ class _Sidebar extends StatelessWidget {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              leading: Icon(AdaptiveShell.icons[i]),
-              title: Text(AdaptiveShell.labels[i]),
-              onTap: () => onSelect(i),
+              leading: Icon(AdaptiveShell.plannerIcons[i]),
+              title: Text(AdaptiveShell.plannerLabels[i]),
+              trailing: i == 4 ? const Icon(Icons.lock_outline_rounded) : null,
+              onTap: i == 4 ? onBudget : () => onSelectPlanner(i),
             ),
           ),
-        const SizedBox(height: 40),
-        const Text('A thoughtful beginning.\nAn early look at Twogethera.'),
+        const Divider(height: AppSpace.xl),
+        Text('More', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: AppSpace.xs),
+        ListTile(
+          leading: const Icon(Icons.search_rounded),
+          title: const Text('Search'),
+          selected: ModalRoute.of(context)?.settings.name == '/search',
+          onTap: () => context.go('/search'),
+        ),
+        ListTile(
+          leading: const Icon(Icons.auto_awesome_outlined),
+          title: const Text('Design Studio'),
+          onTap: () => onSelectUtility(_UtilityDestination.studio),
+        ),
+        ListTile(
+          leading: const Icon(Icons.tune_rounded),
+          title: const Text('Appearance'),
+          onTap: () => onSelectUtility(_UtilityDestination.appearance),
+        ),
       ],
     ),
   );

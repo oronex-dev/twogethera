@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:twogethera/app/routing/app_router.dart';
 import 'package:twogethera/app/theme/app_theme.dart';
+import 'package:twogethera/app/twogethera_app.dart';
 import 'package:twogethera/features/authentication/application/auth_controller.dart';
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
 import 'package:twogethera/features/dashboard/domain/dashboard_preferences.dart';
@@ -112,6 +114,53 @@ class _Cp008Repository
 }
 
 void main() {
+  testWidgets('Summary quick action opens the existing planner editor', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _Cp008Repository();
+    final container = ProviderContainer(
+      overrides: [authRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    addTearDown(repository.dispose);
+    final router = container.read(appRouterProvider);
+    await container.read(authControllerProvider.notifier).signIn('a', 'b');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const TwogetheraApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add an idea'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/planner');
+    expect(
+      router.routeInformationProvider.value.uri.queryParameters['tab'],
+      '0',
+    );
+    expect(
+      router.routeInformationProvider.value.uri.queryParameters.containsKey(
+        'request',
+      ),
+      isFalse,
+      reason: 'The one-shot request is removed after the editor opens.',
+    );
+    expect(find.text('Add to your bucket list'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Go to Summary'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add an idea'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add to your bucket list'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('global search groups planner results and opens the exact task', (
     tester,
   ) async {
@@ -207,8 +256,8 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.ensureVisible(find.text('Customize dashboard'));
-      await tester.tap(find.text('Customize dashboard'));
+      await tester.ensureVisible(find.text('Customize summaries'));
+      await tester.tap(find.text('Customize summaries'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(Checkbox).first); // hide bucket list
       await tester.tap(find.byTooltip('Move Upcoming plans up'));

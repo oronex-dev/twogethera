@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../app/theme/theme_mode_controller.dart';
@@ -38,6 +39,11 @@ class AuthFrame extends ConsumerWidget {
         ),
         title: const Text('Twogethera'),
         actions: [
+          IconButton(
+            tooltip: 'Go to Summary',
+            onPressed: () => context.go('/'),
+            icon: const TogetherMark(size: 34),
+          ),
           PopupMenuButton<ThemeMode>(
             tooltip: 'Choose appearance',
             initialValue: ref.watch(themeModeProvider),

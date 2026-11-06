@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
+import '../../../shared/widgets/together_mark.dart';
 import '../../authentication/application/auth_controller.dart';
 import '../domain/partner_invitation_repository.dart';
 
@@ -202,10 +203,24 @@ class _PartnerLinkingScreenState extends ConsumerState<PartnerLinkingScreen> {
       appBar: AppBar(
         title: const Text('Your couple space'),
         leading: IconButton(
-          tooltip: 'Back to home',
-          onPressed: () => context.go('/'),
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/');
+            }
+          },
           icon: const Icon(Icons.arrow_back_rounded),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Go to Summary',
+            onPressed: () => context.go('/'),
+            icon: const TogetherMark(size: 34),
+          ),
+          const SizedBox(width: AppSpace.xs),
+        ],
       ),
       body: ResponsivePage(
         child: Column(

@@ -15,14 +15,10 @@ void main() {
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       await tester.pumpWidget(const ProviderScope(child: TwogetheraApp()));
       await tester.pumpAndSettle();
-      expect(find.text('A little space.\nFor the two of you.'), findsOneWidget);
-      await tester.scrollUntilVisible(
-        find.text('Thoughtfully built for a life together.'),
-        200,
-        scrollable: find.descendant(
-          of: find.byKey(const ValueKey('page-scroll')),
-          matching: find.byType(Scrollable),
-        ),
+      expect(find.text('Your shared space'), findsOneWidget);
+      expect(
+        find.text('Sign in to see your shared plans and milestones.'),
+        findsOneWidget,
       );
       expect(tester.takeException(), isNull);
     });
@@ -31,15 +27,19 @@ void main() {
   testWidgets('Appearance navigation and all theme modes work', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: TwogetheraApp()));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Appearance settings'));
+    await tester.tap(find.byTooltip('More options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Appearance'));
     await tester.pumpAndSettle();
     expect(find.text('Make yourself at home'), findsOneWidget);
+    await tester.ensureVisible(find.text('Dark'));
     await tester.tap(find.text('Dark'));
     await tester.pumpAndSettle();
     expect(
       Theme.of(tester.element(find.text('Dark'))).brightness,
       Brightness.dark,
     );
+    await tester.ensureVisible(find.text('Light'));
     await tester.tap(find.text('Light'));
     await tester.pumpAndSettle();
     expect(
@@ -48,15 +48,16 @@ void main() {
     );
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    await tester.ensureVisible(find.text('System'));
     await tester.tap(find.text('System'));
     await tester.pumpAndSettle();
     expect(
       Theme.of(tester.element(find.text('System'))).brightness,
       Brightness.dark,
     );
-    await tester.tap(find.byTooltip('Back to home'));
+    await tester.tap(find.byTooltip('Back'));
     await tester.pumpAndSettle();
-    expect(find.text('Our story starts here'), findsOneWidget);
+    expect(find.text('Your shared space'), findsOneWidget);
   });
 
   testWidgets('Unknown routes offer a working way home', (tester) async {
@@ -73,7 +74,7 @@ void main() {
     expect(find.text('Page not found'), findsOneWidget);
     await tester.tap(find.text('Go home'));
     await tester.pumpAndSettle();
-    expect(find.text('Our story starts here'), findsOneWidget);
+    expect(find.text('Your shared space'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

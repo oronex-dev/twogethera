@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:twogethera/app/routing/app_router.dart';
 import 'package:twogethera/app/theme/theme_mode_controller.dart';
 import 'package:twogethera/app/twogethera_app.dart';
+import 'package:twogethera/features/authentication/application/auth_controller.dart';
+import 'package:twogethera/features/authentication/domain/auth_repository.dart';
+import 'package:twogethera/features/dashboard/domain/dashboard_preferences.dart';
 
 Finder get pageScroll => find.descendant(
   of: find.byKey(const ValueKey('page-scroll')),
@@ -13,6 +18,32 @@ Finder get pageScroll => find.descendant(
         widget is Scrollable && widget.axisDirection == AxisDirection.down,
   ),
 );
+
+class _UnpairedNavigationAuth
+    implements AuthRepository, DashboardPreferencesRepository {
+  final _events = StreamController<AuthSignal>.broadcast(sync: true);
+
+  @override
+  Stream<AuthSignal> get changes => _events.stream;
+  @override
+  Future<void> signIn(String email, String password) async =>
+      _events.add(AuthSignal.signedIn);
+  @override
+  Future<AccountContext> accountContext() async =>
+      const AccountContext(userId: 'nav-user', spaces: []);
+  @override
+  Future<void> clearLocalSession() async => _events.add(AuthSignal.cleared);
+  @override
+  Future<void> dispose() => _events.close();
+  @override
+  Future<DashboardPreferences?> loadDashboardPreferences(String userId) async =>
+      null;
+  @override
+  Future<void> saveDashboardPreferences(
+    String userId,
+    DashboardPreferences preferences,
+  ) async {}
+}
 
 Future<ProviderContainer> open(
   WidgetTester tester, {
@@ -51,17 +82,12 @@ void main() {
       ) async {
         await open(tester, path: path, width: width, scale: 2, dark: true);
         expect(tester.takeException(), isNull);
-        final footer = switch (path) {
-          '/' => 'Thoughtfully built for a life together.',
-          '/studio' => 'These controls are for visual exploration. Preview choices reset when you leave the studio.',
-          _ => 'After-hours palette is active.',
+        final pageContent = switch (path) {
+          '/' => 'Your shared space',
+          '/studio' => 'Small details. A shared feeling.',
+          _ => 'Make yourself at home',
         };
-        await tester.scrollUntilVisible(
-          find.text(footer),
-          250,
-          scrollable: pageScroll,
-        );
-        expect(find.text(footer).hitTestable(), findsOneWidget);
+        expect(find.text(pageContent), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }
@@ -78,7 +104,9 @@ void main() {
         find.byType(NavigationRail),
         width >= 600 && width < 1100 ? findsOneWidget : findsNothing,
       );
-      await tester.tap(find.text('Studio'));
+      await tester.tap(find.byTooltip('More options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Design Studio').last);
       await tester.pumpAndSettle();
       expect(
         container
@@ -90,22 +118,134 @@ void main() {
         '/studio',
       );
       expect(find.text('Small details. A shared feeling.'), findsOneWidget);
-      await tester.tap(find.text('Appearance'));
+      if (width < 600) {
+        expect(find.byType(NavigationBar), findsNothing);
+      } else if (width < 1100) {
+        expect(
+          tester
+              .widget<NavigationRail>(find.byType(NavigationRail))
+              .selectedIndex,
+          isNull,
+        );
+      } else {
+        expect(
+          (tester.widget<ListTile>(find.widgetWithText(ListTile, 'Summary')))
+              .selected,
+          isFalse,
+        );
+      }
+      await tester.tap(find.byTooltip('More options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Appearance').last);
       await tester.pumpAndSettle();
       expect(find.text('Make yourself at home'), findsOneWidget);
+      if (width < 600) {
+        expect(find.byType(NavigationBar), findsNothing);
+      } else if (width < 1100) {
+        expect(
+          tester
+              .widget<NavigationRail>(find.byType(NavigationRail))
+              .selectedIndex,
+          isNull,
+        );
+      } else {
+        expect(
+          (tester.widget<ListTile>(find.widgetWithText(ListTile, 'Summary')))
+              .selected,
+          isFalse,
+        );
+      }
     });
   }
 
   testWidgets('Large-text mobile drawer opens all destinations', (
     tester,
   ) async {
-    await open(tester, width: 320, scale: 2);
+    final container = await open(tester, width: 320, scale: 2);
     expect(find.byType(NavigationBar), findsNothing);
     await tester.tap(find.byTooltip('Open navigation menu'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Studio'));
+    expect(find.byType(Drawer), findsOneWidget);
+    expect(find.text('Bucket List'), findsOneWidget);
+    expect(find.text('Important Dates'), findsOneWidget);
+    expect(find.text('Plans & Calendar'), findsOneWidget);
+    await tester.tap(find.text('Bucket List'));
     await tester.pumpAndSettle();
-    expect(find.text('Small details. A shared feeling.'), findsOneWidget);
+    expect(
+      container.read(appRouterProvider).routeInformationProvider.value.uri.path,
+      '/auth/local',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Back and TogetherMark both return to Summary safely', (
+    tester,
+  ) async {
+    final container = await open(tester, path: '/settings', width: 900);
+    final router = container.read(appRouterProvider);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(find.text('Your shared space'), findsOneWidget);
+
+    router.push('/settings');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/');
+
+    router.go('/studio');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Go to Summary'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/');
+    expect(find.text('Your shared space'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Search and direct planner links retain their route context', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final auth = _UnpairedNavigationAuth();
+    final container = ProviderContainer(
+      overrides: [authRepositoryProvider.overrideWithValue(auth)],
+    );
+    addTearDown(container.dispose);
+    addTearDown(auth.dispose);
+    final router = container.read(appRouterProvider);
+    await container
+        .read(authControllerProvider.notifier)
+        .signIn('nav@example.invalid', 'synthetic');
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const TwogetheraApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    router.go('/planner?tab=1&type=date&item=date-1');
+    await tester.pumpAndSettle();
+    expect(find.text('Important Dates'), findsOneWidget);
+    expect(find.text('A space for two'), findsOneWidget);
+    expect(router.routeInformationProvider.value.uri.queryParameters, {
+      'tab': '1',
+      'type': 'date',
+      'item': 'date-1',
+    });
+
+    await tester.tap(find.byTooltip('Search your shared planner'));
+    await tester.pumpAndSettle();
+    expect(router.routeInformationProvider.value.uri.path, '/search');
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(
+      find.text('Link your partner to search shared planner data.'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -162,7 +302,7 @@ void main() {
   ) async {
     await open(tester, width: 1440);
     var focusedStudio = false;
-    for (var i = 0; i < 16; i++) {
+    for (var i = 0; i < 24; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       FocusManager.instance.primaryFocus?.context?.visitAncestorElements((
@@ -171,7 +311,7 @@ void main() {
         final widget = element.widget;
         if (widget is ListTile &&
             widget.title is Text &&
-            (widget.title! as Text).data == 'Studio') {
+            (widget.title! as Text).data == 'Design Studio') {
           focusedStudio = true;
         }
         return !focusedStudio;
@@ -184,6 +324,18 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('Small details. A shared feeling.'), findsOneWidget);
+  });
+
+  testWidgets('Summary remains the signed-out landing page without overflow', (
+    tester,
+  ) async {
+    await open(tester, width: 320, scale: 2);
+    expect(find.text('Your shared space'), findsOneWidget);
+    expect(
+      find.text('Sign in to see your shared plans and milestones.'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   for (final dark in [false, true]) {

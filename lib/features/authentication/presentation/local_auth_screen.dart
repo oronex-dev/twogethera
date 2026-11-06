@@ -14,7 +14,13 @@ class AuthWelcomeScreen extends ConsumerWidget {
     return AuthFrame(
       title: 'Your story, together.',
       description: 'Make room for the moments that matter.',
-      onBack: () => context.go('/'),
+      onBack: () {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/');
+        }
+      },
       backLabel: 'Back to preview',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -71,7 +77,7 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
           .signIn(_email.text, password);
       if (mounted &&
           ref.read(authControllerProvider).phase == AuthPhase.authenticated) {
-        context.go(widget.nextRoute ?? '/account');
+        context.go(widget.nextRoute ?? '/');
       }
     } finally {
       _submitting = false;
@@ -181,7 +187,13 @@ class LocalAccountScreen extends ConsumerWidget {
     return AuthFrame(
       title: 'A space for you.',
       description: 'Your account, with a little peace of mind.',
-      onBack: () => context.go('/'),
+      onBack: () {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/');
+        }
+      },
       backLabel: 'Back to preview',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

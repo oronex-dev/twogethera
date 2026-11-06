@@ -11,12 +11,14 @@ import 'package:twogethera/features/authentication/application/auth_controller.d
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
 import 'package:twogethera/features/authentication/presentation/auth_components.dart';
 import 'package:twogethera/app/theme/theme_mode_controller.dart';
+import 'package:twogethera/features/dashboard/domain/dashboard_preferences.dart';
 
 import 'auth_lifecycle_test.dart' show LifecycleFake;
 import 'authentication_test.dart' show setup, show, config;
 
 // UI/controller doubles only. Genuine Supabase results are a separate suite.
-class ExperienceFake extends LifecycleFake implements AuthExperienceRepository {
+class ExperienceFake extends LifecycleFake
+    implements AuthExperienceRepository, DashboardPreferencesRepository {
   int registrations = 0, resends = 0, resets = 0;
   String? name;
   Completer<void>? registrationWait;
@@ -55,6 +57,16 @@ class ExperienceFake extends LifecycleFake implements AuthExperienceRepository {
     if (link.isEmpty) throw const AuthFailure(AuthProblem.invalidLink);
     await super.verifyLink(link, recovery: recovery);
   }
+
+  @override
+  Future<DashboardPreferences?> loadDashboardPreferences(String userId) async =>
+      null;
+
+  @override
+  Future<void> saveDashboardPreferences(
+    String userId,
+    DashboardPreferences preferences,
+  ) async {}
 }
 
 Finder key(String value) => find.byKey(ValueKey(value));
@@ -235,7 +247,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
       expect(fake.logins, 1);
-      expect(key('account-verified'), findsOneWidget);
+      expect(find.text('Your shared space'), findsOneWidget);
     },
   );
   testWidgets('verification resend has generic feedback and can retry', (
@@ -341,7 +353,7 @@ void main() {
       expect(c.read(authControllerProvider).phase, AuthPhase.authenticated);
       expect(
         c.read(appRouterProvider).routeInformationProvider.value.uri.toString(),
-        '/account',
+        '/',
       );
     },
   );

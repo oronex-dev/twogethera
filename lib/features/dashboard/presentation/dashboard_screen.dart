@@ -5,12 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
-import '../../../shared/widgets/together_mark.dart';
 import '../../authentication/application/auth_controller.dart';
 import '../../shared_planner/application/shared_planner_controller.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
 import '../application/dashboard_preferences_controller.dart';
 import '../domain/dashboard_preferences.dart';
+
+var _plannerCreateRequestSequence = 0;
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -23,6 +24,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   String? _requestedUser;
   String? _requestedCouple;
 
+  void _openPlannerCreateAction(String action, int tab) {
+    final requestId =
+        '${DateTime.now().microsecondsSinceEpoch}-${_plannerCreateRequestSequence++}';
+    context.go(
+      Uri(
+        path: '/planner',
+        queryParameters: {
+          'tab': '$tab',
+          'create': action,
+          'request': requestId,
+        },
+      ).toString(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
@@ -33,6 +49,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         .where((space) => space.state == 'paired')
         .firstOrNull;
     final coupleId = auth.phase == AuthPhase.authenticated ? couple?.id : null;
+
     if (userId != _requestedUser) {
       _requestedUser = userId;
       if (userId != null) {
@@ -55,219 +72,106 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         });
       }
     }
+
     final preferences = ref.watch(dashboardPreferencesControllerProvider);
     final effectivePreferences = preferences.userId == userId
         ? preferences.preferences
         : DashboardPreferences.defaults();
     final planner = ref.watch(sharedPlannerControllerProvider);
     final snapshot = planner.coupleId == coupleId ? planner.snapshot : null;
+    final name = auth.context?.displayName?.trim();
+    final greeting = name == null || name.isEmpty
+        ? 'Your shared space'
+        : 'Welcome back, $name';
+
     return ResponsivePage(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _WelcomeHero(),
-          const SizedBox(height: 40),
-          const SectionHeading(
-            title: 'Our story starts here',
-            description:
-                'Room for the big dreams. And the beautifully ordinary days.',
+          SectionHeading(
+            title: greeting,
+            description: 'A clear view of what is coming up for both of you.',
           ),
-          const SizedBox(height: AppSpace.sm),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: userId == null || preferences.saving
-                  ? null
-                  : () => _customizeDashboard(effectivePreferences),
-              icon: const Icon(Icons.tune_rounded),
-              label: const Text('Customize dashboard'),
+          const SizedBox(height: AppSpace.md),
+          if (coupleId != null)
+            _QuickActions(
+              onAddIdea: () => _openPlannerCreateAction('bucket', 0),
+              onAddDate: () => _openPlannerCreateAction('date', 1),
+              onNewPlan: () => _openPlannerCreateAction('plan', 2),
+            )
+          else if (auth.phase == AuthPhase.authenticated)
+            const _ConnectionAction(),
+          const SizedBox(height: AppSpace.md),
+          if (userId != null &&
+              preferences.userId == userId &&
+              preferences.error != null)
+            _InlineNotice(
+              message: preferences.error!,
+              color: Theme.of(context).colorScheme.error,
             ),
-          ),
-          if (preferences.userId == userId && preferences.error != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpace.sm),
-              child: Text(
-                preferences.error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          if ((preferences.userId == userId && preferences.loading) ||
-              (coupleId != null && planner.loading && snapshot == null))
-            const LinearProgressIndicator(),
           if (coupleId != null && planner.error != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpace.md),
-              child: Row(
-                children: [
-                  Expanded(child: Text(planner.error!)),
-                  TextButton(
-                    onPressed: () => ref
-                        .read(sharedPlannerControllerProvider.notifier)
-                        .load(coupleId),
-                    child: const Text('Retry'),
-                  ),
-                ],
+            _InlineNotice(
+              message: planner.error!,
+              color: Theme.of(context).colorScheme.error,
+              action: TextButton(
+                onPressed: () => ref
+                    .read(sharedPlannerControllerProvider.notifier)
+                    .load(coupleId),
+                child: const Text('Retry'),
               ),
             ),
-          for (final module in effectivePreferences.order)
-            if (effectivePreferences.visible.contains(module))
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpace.md),
-                child: _DashboardSummaryModule(
-                  module: module,
-                  snapshot: snapshot,
-                  paired: coupleId != null,
-                  onOpen: (type, id, tab) => context.go(
-                    '/planner?tab=$tab&type=$type&item=${Uri.encodeComponent(id)}',
-                  ),
+          if (auth.phase == AuthPhase.loading ||
+              auth.phase == AuthPhase.refreshing)
+            const _LoadingSummary()
+          else if (auth.phase != AuthPhase.authenticated)
+            _SignedOutSummary(onSignIn: () => context.go('/auth/welcome'))
+          else if (coupleId == null)
+            const _UnpairedSummary()
+          else if (snapshot == null && planner.loading)
+            const _LoadingSummary()
+          else if (snapshot == null)
+            _PlannerUnavailable(
+              onRetry: () => ref
+                  .read(sharedPlannerControllerProvider.notifier)
+                  .load(coupleId),
+            )
+          else ...[
+            const SectionHeading(
+              title: 'Your shared planner',
+              description: 'The moments ahead and the plans taking shape.',
+            ),
+            if (userId != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: preferences.saving
+                      ? null
+                      : () => _customizeDashboard(effectivePreferences),
+                  icon: const Icon(Icons.tune_rounded),
+                  label: const Text('Customize summaries'),
                 ),
               ),
-          const SizedBox(height: 24),
-          SurfaceCard(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final text = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Make plans together',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Keep your shared ideas, important dates, and plans in one calm place.',
-                    ),
-                  ],
-                );
-                final action = FilledButton.tonalIcon(
-                  onPressed: () => context.go('/planner'),
-                  icon: const Icon(Icons.event_note_outlined),
-                  label: const Text('Open shared planner'),
-                );
-                if (constraints.maxWidth < 680 ||
-                    MediaQuery.textScalerOf(context).scale(14) > 20) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [text, const SizedBox(height: 20), action],
-                  );
-                }
-                return Row(
-                  children: [
-                    Expanded(child: text),
-                    const SizedBox(width: 24),
-                    action,
-                  ],
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 24),
-          SurfaceCard(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final text = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'A space for two',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Invite your partner with a private, one-time code.',
-                    ),
-                  ],
-                );
-                final action = FilledButton.tonalIcon(
-                  onPressed: () => context.go('/partner'),
-                  icon: const Icon(Icons.favorite_border_rounded),
-                  label: const Text('Partner linking'),
-                );
-                if (constraints.maxWidth < 680 ||
-                    MediaQuery.textScalerOf(context).scale(14) > 20) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [text, const SizedBox(height: 20), action],
-                  );
-                }
-                return Row(
-                  children: [
-                    Expanded(child: text),
-                    const SizedBox(width: 24),
-                    action,
-                  ],
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 24),
-          const AdaptiveGrid(
-            children: [
-              IdeaCard(
-                icon: Icons.north_east_rounded,
-                title: 'A little more someday',
-                description: 'The places to go. The things to try. A home for your shared dreams.',
+            if ((preferences.userId == userId && preferences.loading) ||
+                planner.loading)
+              const Padding(
+                padding: EdgeInsets.only(top: AppSpace.sm),
+                child: LinearProgressIndicator(),
               ),
-              IdeaCard(
-                icon: Icons.wb_sunny_outlined,
-                title: 'Moments that matter',
-                description:
-                    'Milestones and small celebrations, held a little closer.',
-              ),
-              IdeaCard(
-                icon: Icons.spa_outlined,
-                title: 'Life, in your rhythm',
-                description: 'A calmer way to make room for what matters to both of you.',
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          SurfaceCard(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final text = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Made to feel like yours',
-                      style: Theme.of(context).textTheme.titleLarge,
+            const SizedBox(height: AppSpace.md),
+            for (final module in effectivePreferences.order)
+              if (effectivePreferences.visible.contains(module))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpace.md),
+                  child: _DashboardSummaryModule(
+                    module: module,
+                    snapshot: snapshot,
+                    onOpen: (type, id, tab) => context.go(
+                      '/planner?tab=$tab&type=$type&item=${Uri.encodeComponent(id)}',
                     ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Explore the colors, details, and little interactions taking shape.',
-                    ),
-                  ],
-                );
-                final action = OutlinedButton.icon(
-                  onPressed: () => context.go('/studio'),
-                  icon: const Icon(Icons.arrow_forward_rounded),
-                  label: const Text('Explore the studio'),
-                );
-                if (constraints.maxWidth < 680 ||
-                    MediaQuery.textScalerOf(context).scale(14) > 20) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [text, const SizedBox(height: 24), action],
-                  );
-                }
-                return Row(
-                  children: [
-                    Expanded(child: text),
-                    const SizedBox(width: 28),
-                    action,
-                  ],
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 32),
-          Text(
-            'Thoughtfully built for a life together.',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 12),
+                  ),
+                ),
+          ],
+          const SizedBox(height: AppSpace.md),
         ],
       ),
     );
@@ -372,54 +276,201 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({
+    required this.onAddIdea,
+    required this.onAddDate,
+    required this.onNewPlan,
+  });
+
+  final VoidCallback onAddIdea;
+  final VoidCallback onAddDate;
+  final VoidCallback onNewPlan;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: AppSpace.sm,
+    runSpacing: AppSpace.sm,
+    children: [
+      FilledButton.tonalIcon(
+        onPressed: onAddIdea,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add an idea'),
+      ),
+      FilledButton.tonalIcon(
+        onPressed: onAddDate,
+        icon: const Icon(Icons.event_available_outlined),
+        label: const Text('Add an important date'),
+      ),
+      FilledButton.tonalIcon(
+        onPressed: onNewPlan,
+        icon: const Icon(Icons.event_note_outlined),
+        label: const Text('Create a plan'),
+      ),
+    ],
+  );
+}
+
+class _ConnectionAction extends StatelessWidget {
+  const _ConnectionAction();
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    crossAxisAlignment: WrapCrossAlignment.center,
+    spacing: AppSpace.sm,
+    runSpacing: AppSpace.xs,
+    children: [
+      Text('Connect with your partner to open the shared planner.'),
+      FilledButton.tonalIcon(
+        onPressed: () => context.go('/partner'),
+        icon: const Icon(Icons.favorite_border_rounded),
+        label: const Text('Link with your partner'),
+      ),
+    ],
+  );
+}
+
+class _SignedOutSummary extends StatelessWidget {
+  const _SignedOutSummary({required this.onSignIn});
+  final VoidCallback onSignIn;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: AppSpace.sm,
+      runSpacing: AppSpace.sm,
+      children: [
+        const Text('Sign in to see your shared plans and milestones.'),
+        FilledButton.tonalIcon(
+          onPressed: onSignIn,
+          icon: const Icon(Icons.login_rounded),
+          label: const Text('Sign in'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _UnpairedSummary extends StatelessWidget {
+  const _UnpairedSummary();
+
+  @override
+  Widget build(BuildContext context) => const SurfaceCard(
+    child: Row(
+      children: [
+        Icon(Icons.lock_outline_rounded),
+        SizedBox(width: AppSpace.sm),
+        Expanded(
+          child: Text(
+            'Shared planner data appears after both partners are linked.',
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _LoadingSummary extends StatelessWidget {
+  const _LoadingSummary();
+
+  @override
+  Widget build(BuildContext context) => const Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      LinearProgressIndicator(),
+      SizedBox(height: AppSpace.sm),
+      Text('Loading your shared planner…'),
+    ],
+  );
+}
+
+class _PlannerUnavailable extends StatelessWidget {
+  const _PlannerUnavailable({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Row(
+      children: [
+        const Expanded(child: Text('Your planner could not be loaded.')),
+        TextButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Retry'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InlineNotice extends StatelessWidget {
+  const _InlineNotice({
+    required this.message,
+    required this.color,
+    this.action,
+  });
+  final String message;
+  final Color color;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpace.sm),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(message, style: TextStyle(color: color)),
+        ),
+        action ?? const SizedBox.shrink(),
+      ],
+    ),
+  );
+}
+
 class _DashboardSummaryModule extends StatelessWidget {
   const _DashboardSummaryModule({
     required this.module,
     required this.snapshot,
-    required this.paired,
     required this.onOpen,
   });
 
   final DashboardModule module;
-  final SharedPlannerSnapshot? snapshot;
-  final bool paired;
+  final SharedPlannerSnapshot snapshot;
   final void Function(String type, String id, int tab) onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final bucketItems =
-        snapshot?.bucketItems.where((item) => !item.completed).toList() ??
-        const <BucketListItem>[];
     final now = DateTime.now();
-    final dates = List<ImportantDateEntry>.of(
-      snapshot?.importantDates.where((entry) {
-            final next = entry.nextOccurrence(now);
-            return !next.isBefore(DateTime(now.year, now.month, now.day));
-          }) ??
-          const <ImportantDateEntry>[],
-    );
-    dates.sort(
-      (a, b) => a.nextOccurrence(now).compareTo(b.nextOccurrence(now)),
-    );
-    final plans = List<SharedPlan>.of(
-      snapshot?.plans.where((plan) => !plan.startsAt.isBefore(now)) ??
-          const <SharedPlan>[],
-    );
-    plans.sort((a, b) => a.startsAt.compareTo(b.startsAt));
-    final (title, icon) = switch (module) {
-      DashboardModule.bucketList => (
-        'Active shared goals',
-        Icons.checklist_rounded,
-      ),
-      DashboardModule.importantDates => ('Coming up', Icons.cake_outlined),
-      DashboardModule.plans => ('Upcoming plans', Icons.event_note_outlined),
+    final today = DateTime(now.year, now.month, now.day);
+    final dates =
+        snapshot.importantDates
+            .where((entry) => !entry.nextOccurrence(now).isBefore(today))
+            .toList()
+          ..sort(
+            (a, b) => a.nextOccurrence(now).compareTo(b.nextOccurrence(now)),
+          );
+    final plans =
+        snapshot.plans.where((plan) => !plan.startsAt.isBefore(now)).toList()
+          ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+    final tasks = [
+      for (final plan in snapshot.plans)
+        for (final task in plan.tasks)
+          if (!task.completed) (task, plan),
+    ]..sort((a, b) => a.$2.startsAt.compareTo(b.$2.startsAt));
+
+    final theme = Theme.of(context);
+    final title = switch (module) {
+      DashboardModule.bucketList => 'Bucket List progress',
+      DashboardModule.importantDates => 'Upcoming important dates',
+      DashboardModule.plans => 'Upcoming plans & tasks',
     };
-    final count = switch (module) {
-      DashboardModule.bucketList => bucketItems.length,
-      DashboardModule.importantDates => dates.length,
-      DashboardModule.plans => plans.length,
+    final icon = switch (module) {
+      DashboardModule.bucketList => Icons.checklist_rounded,
+      DashboardModule.importantDates => Icons.cake_outlined,
+      DashboardModule.plans => Icons.event_note_outlined,
     };
+
     return SurfaceCard(
       key: ValueKey('dashboard-module-${module.storageKey}'),
       child: Column(
@@ -430,163 +481,151 @@ class _DashboardSummaryModule extends StatelessWidget {
               Icon(icon, color: theme.colorScheme.primary),
               const SizedBox(width: AppSpace.sm),
               Expanded(child: Text(title, style: theme.textTheme.titleLarge)),
-              if (paired && snapshot != null) Text('$count'),
             ],
           ),
           const SizedBox(height: AppSpace.sm),
-          if (!paired)
-            const Text('Link your partner to see shared planner summaries.')
-          else if (snapshot == null)
-            const Text(
-              'Your shared summary will appear here when it is available.',
-            )
-          else if (count == 0)
-            Text(switch (module) {
-              DashboardModule.bucketList =>
-                'No active ideas yet. Add one to start dreaming together.',
-              DashboardModule.importantDates =>
-                'No upcoming dates on your calendar.',
-              DashboardModule.plans =>
-                'No upcoming plans. Make room for something together.',
-            })
-          else ...[
-            for (final item in switch (module) {
-              DashboardModule.bucketList =>
-                bucketItems
-                    .take(2)
-                    .map((item) => (item.title, 'bucket', item.id, 0))
-                    .toList(),
-              DashboardModule.importantDates =>
-                dates
-                    .take(2)
-                    .map(
-                      (item) => (
-                        item.title,
-                        '${item.daysUntil(now)} days away',
-                        item.id,
-                        1,
-                      ),
-                    )
-                    .toList(),
-              DashboardModule.plans =>
-                plans
-                    .take(2)
-                    .map(
-                      (item) => (
-                        item.title,
-                        _formatPlanDate(item.startsAt),
-                        item.id,
-                        2,
-                      ),
-                    )
-                    .toList(),
-            })
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(item.$1),
-                subtitle: Text(
-                  item.$2 == 'bucket' ? 'Bucket list idea' : item.$2,
-                ),
-                trailing: const Icon(Icons.arrow_forward_rounded, size: 18),
-                onTap: () => onOpen(
-                  switch (module) {
-                    DashboardModule.bucketList => 'bucket',
-                    DashboardModule.importantDates => 'date',
-                    DashboardModule.plans => 'plan',
-                  },
-                  item.$3,
-                  item.$4,
-                ),
-              ),
-          ],
+          switch (module) {
+            DashboardModule.bucketList => _bucketSummary(context, snapshot),
+            DashboardModule.importantDates => _dateSummary(context, dates, now),
+            DashboardModule.plans => _planSummary(context, plans, tasks),
+          },
         ],
       ),
     );
   }
 
-  String _formatPlanDate(DateTime value) =>
-      '${value.month}/${value.day} · ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+  Widget _bucketSummary(BuildContext context, SharedPlannerSnapshot snapshot) {
+    final completed = snapshot.bucketItems
+        .where((item) => item.completed)
+        .length;
+    final total = snapshot.bucketItems.length;
+    final ratio = total == 0 ? 0.0 : completed / total;
+    final ideas = snapshot.bucketItems
+        .where((item) => !item.completed)
+        .take(2)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text('$completed of $total completed')),
+            Text('${(ratio * 100).round()}%'),
+          ],
+        ),
+        const SizedBox(height: AppSpace.xs),
+        Semantics(
+          label: 'Bucket List progress, ${(ratio * 100).round()} percent',
+          child: LinearProgressIndicator(value: ratio),
+        ),
+        if (total == 0)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.sm),
+            child: Text('Add your first shared idea to start your list.'),
+          )
+        else if (ideas.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.sm),
+            child: Text('You have completed every idea on your list.'),
+          )
+        else
+          for (final item in ideas)
+            _SummaryRow(
+              title: item.title,
+              subtitle: item.category.label,
+              onTap: () => onOpen('bucket', item.id, 0),
+            ),
+      ],
+    );
+  }
+
+  Widget _dateSummary(
+    BuildContext context,
+    List<ImportantDateEntry> dates,
+    DateTime now,
+  ) => dates.isEmpty
+      ? const Text('No upcoming important dates. Add a birthday or milestone.')
+      : Column(
+          children: [
+            for (final entry in dates.take(3))
+              _SummaryRow(
+                title: entry.title,
+                subtitle:
+                    '${_dateLabel(context, entry.nextOccurrence(now))} · ${entry.daysUntil(now)} ${entry.daysUntil(now) == 1 ? 'day' : 'days'} away',
+                onTap: () => onOpen('date', entry.id, 1),
+              ),
+          ],
+        );
+
+  Widget _planSummary(
+    BuildContext context,
+    List<SharedPlan> plans,
+    List<(PlanTask, SharedPlan)> tasks,
+  ) {
+    if (plans.isEmpty && tasks.isEmpty) {
+      return const Text(
+        'No upcoming plans or open tasks. Make a plan together.',
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final plan in plans.take(2))
+          _SummaryRow(
+            title: plan.title,
+            subtitle: _dateLabel(context, plan.startsAt),
+            onTap: () => onOpen('plan', plan.id, 2),
+          ),
+        if (tasks.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(
+              top: AppSpace.xs,
+              bottom: AppSpace.xs,
+            ),
+            child: Text(
+              'Open tasks · ${tasks.length}',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+          ),
+          for (final (task, plan) in tasks.take(3))
+            _SummaryRow(
+              title: task.title,
+              subtitle: plan.title,
+              icon: Icons.radio_button_unchecked_rounded,
+              onTap: () => onOpen('task', task.id, 2),
+            ),
+        ] else if (plans.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.xs),
+            child: Text('No open tasks.'),
+          ),
+      ],
+    );
+  }
+
+  String _dateLabel(BuildContext context, DateTime value) =>
+      MaterialLocalizations.of(context).formatMediumDate(value);
 }
 
-class _WelcomeHero extends StatelessWidget {
-  const _WelcomeHero();
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.icon = Icons.arrow_forward_rounded,
+  });
+
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final IconData icon;
+
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(32),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          BrandColors.of(context).heroStart,
-          BrandColors.of(context).heroEnd,
-        ],
-      ),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(28),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide =
-              constraints.maxWidth >= 600 &&
-              MediaQuery.textScalerOf(context).scale(14) <= 20;
-          final words = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const PreviewBadge(),
-              const SizedBox(height: 32),
-              Semantics(
-                header: true,
-                child: Text(
-                  'A little space.\nFor the two of you.',
-                  style: wide && constraints.maxWidth >= 900
-                      ? Theme.of(context).textTheme.displayLarge
-                      : Theme.of(context).textTheme.headlineLarge,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Make room for shared dreams, meaningful dates, and everyday moments.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 28),
-              FilledButton.icon(
-                onPressed: () => context.go('/studio'),
-                label: const Text('Discover the details'),
-                icon: const Icon(Icons.arrow_forward_rounded),
-              ),
-            ],
-          );
-          if (wide) {
-            return Row(
-              children: [
-                Expanded(flex: 3, child: words),
-                const SizedBox(width: 24),
-                const Expanded(
-                  flex: 2,
-                  child: Center(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: TogetherMark(size: 260),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              words,
-              const SizedBox(height: 20),
-              const Align(
-                alignment: Alignment.centerRight,
-                child: TogetherMark(size: 144),
-              ),
-            ],
-          );
-        },
-      ),
-    ),
+  Widget build(BuildContext context) => ListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(title),
+    subtitle: Text(subtitle),
+    trailing: Icon(icon, size: 18),
+    onTap: onTap,
   );
 }

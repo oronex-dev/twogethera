@@ -14,6 +14,54 @@ import '../../features/shared_planner/presentation/shared_planner_screen.dart';
 import '../../features/shared_planner/presentation/global_search_screen.dart';
 import '../../shared/widgets/responsive_page.dart';
 
+String? _safeNextRoute(String? value) {
+  if (value == null || value.isEmpty || value.length > 512) return null;
+  final uri = Uri.tryParse(value);
+  if (uri == null || uri.hasAuthority || uri.hasFragment || uri.path.isEmpty) {
+    return null;
+  }
+  if (uri.path == '/partner' || uri.path == '/account' || uri.path == '/') {
+    return uri.path;
+  }
+  if (uri.path == '/search') return '/search';
+  if (uri.path != '/planner') return null;
+
+  final allowed = {'tab', 'type', 'item', 'create', 'request'};
+  if (uri.queryParameters.keys.any((key) => !allowed.contains(key))) {
+    return '/planner';
+  }
+  final tab = uri.queryParameters['tab'];
+  if (tab != null && !{'0', '1', '2'}.contains(tab)) return '/planner';
+  final type = uri.queryParameters['type'];
+  final item = uri.queryParameters['item'];
+  if ((type == null) != (item == null) ||
+      (type != null && !{'bucket', 'date', 'plan', 'task'}.contains(type)) ||
+      (item != null && (item.isEmpty || item.length > 128))) {
+    return '/planner';
+  }
+  final create = uri.queryParameters['create'];
+  if (create != null && !{'bucket', 'date', 'plan'}.contains(create)) {
+    return '/planner';
+  }
+  final request = uri.queryParameters['request'];
+  if (request != null &&
+      (create == null ||
+          request.length > 64 ||
+          !RegExp(r'^[0-9-]+$').hasMatch(request))) {
+    return '/planner';
+  }
+  final query = <String, String>{};
+  if (tab != null) query['tab'] = tab;
+  if (type != null) query['type'] = type;
+  if (item != null) query['item'] = item;
+  if (create != null) query['create'] = create;
+  if (request != null) query['request'] = request;
+  return Uri(
+    path: '/planner',
+    queryParameters: query.isEmpty ? null : query,
+  ).toString();
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier(0);
   ref.listen(authControllerProvider, (_, _) => refresh.value++);
@@ -28,21 +76,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           (route.uri.path == '/account' || route.uri.path == '/auth/local')) {
         return '/auth/recovery';
       }
-      if (route.uri.path == '/account' && !authenticated) return '/auth/local';
+      if (route.uri.path == '/account' && !authenticated) {
+        return '/auth/local?next=%2Faccount';
+      }
       if (route.uri.path == '/partner' && !authenticated) {
         return '/auth/local?next=%2Fpartner';
       }
-      if (route.uri.path == '/planner' && !authenticated) {
-        return '/auth/local?next=%2Fplanner';
-      }
-      if (route.uri.path == '/search' && !authenticated) {
-        return '/auth/local?next=%2Fsearch';
+      if ((route.uri.path == '/planner' || route.uri.path == '/search') &&
+          !authenticated) {
+        return '/auth/local?next=${Uri.encodeComponent(route.uri.toString())}';
       }
       if (route.uri.path.startsWith('/auth/') && authenticated) {
-        if (route.uri.queryParameters['next'] == '/partner') return '/partner';
-        if (route.uri.queryParameters['next'] == '/planner') return '/planner';
-        if (route.uri.queryParameters['next'] == '/search') return '/search';
-        return '/account';
+        return _safeNextRoute(route.uri.queryParameters['next']) ?? '/';
       }
       return null;
     },
@@ -71,12 +116,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/auth/local',
         builder: (context, state) => LocalAuthScreen(
-          nextRoute: switch (state.uri.queryParameters['next']) {
-            '/partner' => '/partner',
-            '/planner' => '/planner',
-            '/search' => '/search',
-            _ => null,
-          },
+          nextRoute: _safeNextRoute(state.uri.queryParameters['next']),
         ),
       ),
       GoRoute(
@@ -87,13 +127,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/partner',
         builder: (context, state) => const PartnerLinkingScreen(),
       ),
-      GoRoute(
-        path: '/planner',
-        builder: (context, state) => const SharedPlannerScreen(),
-      ),
       ShellRoute(
-        builder: (context, state, child) =>
-            AdaptiveShell(path: state.uri.path, child: child),
+        builder: (context, state, child) => AdaptiveShell(
+          path: state.uri.path,
+          queryParameters: state.uri.queryParameters,
+          child: child,
+        ),
         routes: [
           GoRoute(
             path: '/',
@@ -110,6 +149,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/search',
             builder: (context, state) => const GlobalSearchScreen(),
+          ),
+          GoRoute(
+            path: '/planner',
+            builder: (context, state) =>
+                const SharedPlannerScreen(embedded: true),
           ),
         ],
       ),

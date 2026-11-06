@@ -12,7 +12,10 @@ import '../application/shared_planner_controller.dart';
 import '../domain/shared_planner_repository.dart';
 
 class SharedPlannerScreen extends ConsumerStatefulWidget {
-  const SharedPlannerScreen({super.key});
+  const SharedPlannerScreen({this.embedded = false, super.key});
+
+  /// The app shell supplies the shared header and primary navigation when true.
+  final bool embedded;
 
   @override
   ConsumerState<SharedPlannerScreen> createState() =>
@@ -22,6 +25,7 @@ class SharedPlannerScreen extends ConsumerStatefulWidget {
 class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
   String? _requestedCoupleId;
   String? _openedSearchTarget;
+  String? _openedCreateRequest;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +34,10 @@ class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
         .clamp(0, 2);
     final itemType = uri.queryParameters['type'];
     final itemId = uri.queryParameters['item'];
+    final createAction = uri.queryParameters['create'];
+    final createRequest =
+        uri.queryParameters['request'] ??
+        (createAction == null ? null : 'legacy:$createAction:$initialTab');
     final targetKey = itemType == null || itemId == null
         ? null
         : '$itemType:$itemId';
@@ -51,7 +59,9 @@ class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
       }
     }
 
-    if (coupleId == null) return _unpaired();
+    if (coupleId == null) {
+      return widget.embedded ? Scaffold(body: _unpairedBody()) : _unpaired();
+    }
     final state = ref.watch(sharedPlannerControllerProvider);
     final snapshot = state.snapshot;
     if (snapshot != null &&
@@ -61,6 +71,53 @@ class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _openSearchTarget(coupleId, snapshot, itemType!, itemId!);
       });
+    }
+    if (snapshot != null &&
+        widget.embedded &&
+        createAction != null &&
+        createRequest != _openedCreateRequest) {
+      _openedCreateRequest = createRequest;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        switch (createAction) {
+          case 'bucket':
+            unawaited(_editBucket(context, ref, coupleId));
+          case 'date':
+            unawaited(_editDate(context, ref, coupleId));
+          case 'plan':
+            unawaited(_editPlan(context, ref, coupleId));
+        }
+        context.replace('/planner?tab=$initialTab');
+      });
+    }
+
+    if (widget.embedded) {
+      return Scaffold(
+        body: state.loading && snapshot == null
+            ? const Center(child: CircularProgressIndicator())
+            : snapshot == null
+            ? _loadError(coupleId, state.error)
+            : Column(
+                children: [
+                  if (state.error != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpace.md,
+                        AppSpace.sm,
+                        AppSpace.md,
+                        0,
+                      ),
+                      child: _InlineError(
+                        message: state.error!,
+                        onRetry: () => ref
+                            .read(sharedPlannerControllerProvider.notifier)
+                            .load(coupleId),
+                      ),
+                    ),
+                  Expanded(child: _plannerTab(initialTab, coupleId, snapshot)),
+                ],
+              ),
+      );
     }
     return DefaultTabController(
       length: 3,
@@ -186,35 +243,47 @@ class _SharedPlannerScreenState extends ConsumerState<SharedPlannerScreen> {
 
   Widget _unpaired() => Scaffold(
     appBar: AppBar(title: const Text('Shared planner')),
-    body: ResponsivePage(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionHeading(
-            title: 'A space for two',
-            description: 'The shared planner becomes available after both partners accept the invitation.',
+    body: _unpairedBody(),
+  );
+
+  Widget _unpairedBody() => ResponsivePage(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeading(
+          title: 'A space for two',
+          description: 'The shared planner becomes available after both partners accept the invitation.',
+        ),
+        const SizedBox(height: AppSpace.lg),
+        SurfaceCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.lock_outline_rounded, size: 30),
+              const SizedBox(height: AppSpace.md),
+              const Text('No planner data has been loaded.'),
+              const SizedBox(height: AppSpace.md),
+              FilledButton.icon(
+                onPressed: () => context.go('/partner'),
+                icon: const Icon(Icons.favorite_border_rounded),
+                label: const Text('Link with your partner'),
+              ),
+            ],
           ),
-          const SizedBox(height: AppSpace.lg),
-          SurfaceCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.lock_outline_rounded, size: 30),
-                const SizedBox(height: AppSpace.md),
-                const Text('No planner data has been loaded.'),
-                const SizedBox(height: AppSpace.md),
-                FilledButton.icon(
-                  onPressed: () => context.go('/partner'),
-                  icon: const Icon(Icons.favorite_border_rounded),
-                  label: const Text('Link with your partner'),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     ),
   );
+
+  Widget _plannerTab(
+    int index,
+    String coupleId,
+    SharedPlannerSnapshot snapshot,
+  ) => switch (index) {
+    1 => _ImportantDatesTab(coupleId: coupleId, dates: snapshot.importantDates),
+    2 => _PlansTab(coupleId: coupleId, plans: snapshot.plans),
+    _ => _BucketListTab(coupleId: coupleId, items: snapshot.bucketItems),
+  };
 
   Widget _loadError(String coupleId, String? error) => Center(
     child: Padding(

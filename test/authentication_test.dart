@@ -361,11 +361,11 @@ void main() {
       );
       await request;
       await tester.pumpAndSettle();
-      expect(find.text('Local account verified'), findsOneWidget);
+      expect(find.text('Your shared space'), findsOneWidget);
       repository.failure = AuthProblem.denied;
       await container.read(authControllerProvider.notifier).reloadContext();
       await tester.pumpAndSettle();
-      expect(find.text('Local account verified'), findsNothing);
+      expect(find.text('Your shared space'), findsOneWidget);
       expect(
         container
             .read(appRouterProvider)
@@ -373,7 +373,7 @@ void main() {
             .value
             .uri
             .path,
-        '/auth/local',
+        '/',
       );
       expect(tester.takeException(), isNull);
     },
