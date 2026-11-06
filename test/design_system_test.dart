@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:twogethera/app/routing/app_router.dart';
-import 'package:twogethera/app/theme/theme_mode_controller.dart';
 import 'package:twogethera/app/twogethera_app.dart';
+import 'package:twogethera/features/appearance/application/appearance_controller.dart';
 import 'package:twogethera/features/authentication/application/auth_controller.dart';
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
 import 'package:twogethera/features/dashboard/domain/dashboard_preferences.dart';
@@ -60,8 +60,8 @@ Future<ProviderContainer> open(
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   final container = ProviderContainer();
   addTearDown(container.dispose);
-  container
-      .read(themeModeProvider.notifier)
+  await container
+      .read(appearanceControllerProvider.notifier)
       .setMode(dark ? ThemeMode.dark : ThemeMode.light);
   container.read(appRouterProvider).go(path);
   await tester.pumpWidget(

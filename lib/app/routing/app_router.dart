@@ -12,6 +12,8 @@ import '../../features/authentication/presentation/auth_callback_screen.dart';
 import '../../features/partner_linking/presentation/partner_linking_screen.dart';
 import '../../features/shared_planner/presentation/shared_planner_screen.dart';
 import '../../features/shared_planner/presentation/global_search_screen.dart';
+import '../../features/budget/presentation/budget_screen.dart';
+import '../../features/memories/presentation/memories_screen.dart';
 import '../../shared/widgets/responsive_page.dart';
 
 String? _safeNextRoute(String? value) {
@@ -20,7 +22,11 @@ String? _safeNextRoute(String? value) {
   if (uri == null || uri.hasAuthority || uri.hasFragment || uri.path.isEmpty) {
     return null;
   }
-  if (uri.path == '/partner' || uri.path == '/account' || uri.path == '/') {
+  if (uri.path == '/partner' ||
+      uri.path == '/account' ||
+      uri.path == '/budget' ||
+      uri.path == '/memories' ||
+      uri.path == '/') {
     return uri.path;
   }
   if (uri.path == '/search') return '/search';
@@ -82,7 +88,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (route.uri.path == '/partner' && !authenticated) {
         return '/auth/local?next=%2Fpartner';
       }
-      if ((route.uri.path == '/planner' || route.uri.path == '/search') &&
+      if ((route.uri.path == '/planner' ||
+              route.uri.path == '/search' ||
+              route.uri.path == '/budget' ||
+              route.uri.path == '/memories') &&
           !authenticated) {
         return '/auth/local?next=${Uri.encodeComponent(route.uri.toString())}';
       }
@@ -154,6 +163,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/planner',
             builder: (context, state) =>
                 const SharedPlannerScreen(embedded: true),
+          ),
+          GoRoute(
+            path: '/budget',
+            builder: (context, state) => const BudgetScreen(),
+          ),
+          GoRoute(
+            path: '/memories',
+            builder: (context, state) => const MemoriesScreen(),
           ),
         ],
       ),

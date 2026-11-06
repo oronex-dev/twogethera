@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/design_tokens.dart';
-import '../../../app/theme/theme_mode_controller.dart';
+import '../../appearance/application/appearance_controller.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
 import '../../../shared/widgets/together_mark.dart';
@@ -47,7 +47,7 @@ class AuthFrame extends ConsumerWidget {
           PopupMenuButton<ThemeMode>(
             tooltip: 'Choose appearance',
             initialValue: ref.watch(themeModeProvider),
-            onSelected: ref.read(themeModeProvider.notifier).setMode,
+            onSelected: ref.read(appearanceControllerProvider.notifier).setMode,
             icon: const Icon(Icons.contrast_rounded),
             itemBuilder: (_) => [
               for (final mode in ThemeMode.values)

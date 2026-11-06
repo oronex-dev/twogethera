@@ -1,0 +1,1468 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../../../app/theme/design_tokens.dart';
+import '../../../shared/widgets/design_components.dart';
+import '../../../shared/widgets/responsive_page.dart';
+import '../../authentication/application/auth_controller.dart';
+import '../application/budget_controller.dart';
+import '../domain/budget_models.dart';
+
+class BudgetScreen extends ConsumerStatefulWidget {
+  const BudgetScreen({super.key});
+
+  @override
+  ConsumerState<BudgetScreen> createState() => _BudgetScreenState();
+}
+
+class _BudgetScreenState extends ConsumerState<BudgetScreen> {
+  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+  String _query = '';
+  BudgetCategory? _filter;
+  String? _requestedKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = ref.watch(authControllerProvider);
+    final couple = auth.context?.spaces
+        .where((space) => space.state == 'paired')
+        .firstOrNull;
+    final coupleId = auth.phase == AuthPhase.authenticated ? couple?.id : null;
+    if (coupleId == null) _requestedKey = null;
+    final state = ref.watch(budgetControllerProvider);
+    final requestKey = coupleId == null
+        ? null
+        : '$coupleId:${_month.year}-${_month.month}';
+    if (requestKey != null && requestKey != _requestedKey) {
+      _requestedKey = requestKey;
+      final requestedCoupleId = coupleId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref
+              .read(budgetControllerProvider.notifier)
+              .load(requestedCoupleId!, _month);
+        }
+      });
+    }
+
+    if (coupleId == null) {
+      return ResponsivePage(
+        child: SurfaceCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Budget is shared',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              const Text('Link your partner before creating a shared budget.'),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => context.go('/partner'),
+                icon: const Icon(Icons.favorite_border_rounded),
+                label: const Text('Link partner'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final snapshot = state.coupleId == coupleId && state.month == _month
+        ? state.snapshot
+        : null;
+    return ResponsivePage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeading(
+            title: 'A clear view of your spending',
+            description: 'Plan together, record expenses, and see where the month is going.',
+          ),
+          const SizedBox(height: AppSpace.md),
+          _MonthSelector(
+            month: _month,
+            onMove: (delta) => setState(() {
+              _month = DateTime(_month.year, _month.month + delta);
+              _requestedKey = null;
+            }),
+          ),
+          if (state.error != null)
+            _BudgetNotice(
+              message: state.error!,
+              isError: true,
+              action: TextButton(
+                onPressed: () => ref
+                    .read(budgetControllerProvider.notifier)
+                    .load(coupleId, _month),
+                child: const Text('Retry'),
+              ),
+            ),
+          if (state.notice != null)
+            _BudgetNotice(message: state.notice!, isError: false),
+          if (state.loading && snapshot == null)
+            const Padding(
+              padding: EdgeInsets.all(48),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (snapshot == null)
+            const _BudgetEmpty(
+              title: 'Your budget is loading',
+              body: 'Your couple data will appear here when available.',
+            )
+          else if (snapshot.budget == null)
+            _BudgetEmpty(
+              title: 'Start with a monthly budget',
+              body: 'Choose a currency and spending limit. Existing amounts are never converted when the currency changes.',
+              action: FilledButton.icon(
+                onPressed: state.saving ? null : () => _editBudget(snapshot),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Create budget'),
+              ),
+            )
+          else ...[
+            _BudgetSummary(
+              snapshot: snapshot,
+              saving: state.saving,
+              onEditBudget: () => _editBudget(snapshot),
+              onAddExpense: () => _editExpense(snapshot),
+              onAddRecurring: () => _editRecurring(snapshot),
+            ),
+            const SizedBox(height: AppSpace.md),
+            _CategoryOverview(
+              snapshot: snapshot,
+              onLimit: (category) => _editCategoryLimit(snapshot, category),
+            ),
+            const SizedBox(height: AppSpace.md),
+            _RecurringSection(
+              snapshot: snapshot,
+              onAdd: () => _editRecurring(snapshot),
+              onRecord: (rule) => _recordOccurrence(snapshot, rule),
+            ),
+            const SizedBox(height: AppSpace.md),
+            _ExpenseHistory(
+              snapshot: snapshot,
+              query: _query,
+              category: _filter,
+              onQuery: (value) => setState(() => _query = value),
+              onFilter: (value) => setState(() => _filter = value),
+              onEdit: (expense) => _editExpense(snapshot, expense: expense),
+              onDelete: (expense) => _deleteExpense(expense),
+              onReceipts: (expense) => _manageReceipts(expense),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editBudget(BudgetSnapshot snapshot) async {
+    final budget = snapshot.budget;
+    final initialCurrency = budget?.currency ?? CurrencyUnit.supported.first;
+    final initialLimit = budget == null
+        ? ''
+        : ExactMoney(
+            budget.limitMinor,
+            initialCurrency,
+          ).format().split(' ').first;
+    final result = await showDialog<({CurrencyUnit currency, int limit})>(
+      context: context,
+      builder: (context) => _BudgetFormDialog(
+        initialCurrency: initialCurrency,
+        initialLimit: initialLimit,
+        currencyLocked: budget != null && snapshot.expenses.isNotEmpty,
+      ),
+    );
+    if (result == null || !mounted) return;
+    await ref
+        .read(budgetControllerProvider.notifier)
+        .saveBudget(result.currency, result.limit);
+  }
+
+  Future<void> _editCategoryLimit(
+    BudgetSnapshot snapshot,
+    BudgetCategory category,
+  ) async {
+    final budget = snapshot.budget;
+    if (budget == null) return;
+    final current = budget.categoryLimits[category];
+    final controller = TextEditingController(
+      text: current == null
+          ? ''
+          : ExactMoney(current, budget.currency).format().split(' ').first,
+    );
+    final limit = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${category.label} limit'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Amount (${budget.currency.code})',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = ExactMoney.parse(controller.text, budget.currency);
+              if (parsed == null && controller.text.trim().isNotEmpty) return;
+              Navigator.pop(context, parsed ?? 0);
+            },
+            child: const Text('Save limit'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (limit != null && mounted) {
+      await ref
+          .read(budgetControllerProvider.notifier)
+          .saveCategoryLimit(category, limit);
+    }
+  }
+
+  Future<void> _editExpense(
+    BudgetSnapshot snapshot, {
+    CoupleExpense? expense,
+  }) async {
+    final budget = snapshot.budget;
+    if (budget == null || snapshot.members.length != 2) return;
+    final values = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => _ExpenseFormDialog(
+        currency: budget.currency,
+        monthStart: budget.monthStart,
+        members: snapshot.members,
+        expense: expense,
+      ),
+    );
+    if (values == null || !mounted) return;
+    await ref
+        .read(budgetControllerProvider.notifier)
+        .saveExpense(
+          values,
+          expenseId: expense?.id,
+          expectedRevision: expense?.revision,
+        );
+  }
+
+  String get coupleIdOrEmpty =>
+      ref.read(budgetControllerProvider).coupleId ?? '';
+
+  Future<void> _editRecurring(BudgetSnapshot snapshot) async {
+    final budget = snapshot.budget;
+    if (budget == null || snapshot.members.length != 2) return;
+    final values = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => _RecurringFormDialog(
+        currency: budget.currency,
+        members: snapshot.members,
+      ),
+    );
+    if (values != null && mounted) {
+      await ref
+          .read(budgetControllerProvider.notifier)
+          .saveRecurringRule(values);
+    }
+  }
+
+  Future<void> _recordOccurrence(
+    BudgetSnapshot snapshot,
+    RecurringExpenseRule rule,
+  ) async {
+    final result = await showDatePicker(
+      context: context,
+      initialDate: DateTime(_month.year, _month.month, 1),
+      firstDate: DateTime(_month.year, _month.month, 1),
+      lastDate: DateTime(_month.year, _month.month + 1, 0),
+    );
+    if (result != null && mounted) {
+      await ref
+          .read(budgetControllerProvider.notifier)
+          .recordRecurring(rule, result);
+    }
+  }
+
+  Future<void> _deleteExpense(CoupleExpense expense) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this expense?'),
+        content: const Text(
+          'This removes the shared expense and its recorded split.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await ref.read(budgetControllerProvider.notifier).deleteExpense(expense);
+    }
+  }
+
+  Future<void> _manageReceipts(CoupleExpense expense) async {
+    final coupleId = coupleIdOrEmpty;
+    final repository = ref.read(budgetRepositoryProvider);
+    List<ExpenseReceipt> receipts;
+    try {
+      receipts = await repository.loadReceipts(coupleId, expense.id);
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          'Private receipts could not be loaded. Retry when connected.',
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Private receipts'),
+          content: SizedBox(
+            width: 480,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 440),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (receipts.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 18),
+                        child: Text('No receipts attached yet.'),
+                      )
+                    else
+                      ...receipts.map(
+                        (receipt) => ListTile(
+                          leading: const Icon(Icons.image_outlined),
+                          title: Text(
+                            '${(receipt.byteSize / 1024).ceil()} KB image',
+                          ),
+                          trailing: Wrap(
+                            children: [
+                              IconButton(
+                                tooltip: 'View private receipt',
+                                icon: const Icon(Icons.visibility_outlined),
+                                onPressed: () => _viewReceipt(receipt),
+                              ),
+                              IconButton(
+                                tooltip: 'Remove receipt',
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                onPressed: () async {
+                                  try {
+                                    await repository.deleteReceipt(receipt);
+                                    final updated = await repository
+                                        .loadReceipts(coupleId, expense.id);
+                                    setDialogState(() => receipts = updated);
+                                    if (mounted) {
+                                      await ref
+                                          .read(
+                                            budgetControllerProvider.notifier,
+                                          )
+                                          .load(coupleId, _month);
+                                    }
+                                  } catch (_) {
+                                    if (mounted) {
+                                      _showMessage(
+                                        'Receipt removal failed. Retry when connected.',
+                                      );
+                                    }
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: receipts.length >= 5
+                          ? null
+                          : () async {
+                              final files = await ImagePicker().pickMultiImage(
+                                imageQuality: 90,
+                              );
+                              if (files.isEmpty) return;
+                              try {
+                                for (final file in files.take(
+                                  5 - receipts.length,
+                                )) {
+                                  final bytes = await file.readAsBytes();
+                                  await repository.uploadReceipt(
+                                    coupleId,
+                                    expense.id,
+                                    bytes,
+                                    file.mimeType ?? 'image/jpeg',
+                                  );
+                                }
+                                final updated = await repository.loadReceipts(
+                                  coupleId,
+                                  expense.id,
+                                );
+                                setDialogState(() => receipts = updated);
+                                if (mounted) {
+                                  await ref
+                                      .read(budgetControllerProvider.notifier)
+                                      .load(coupleId, _month);
+                                }
+                              } catch (_) {
+                                if (mounted) {
+                                  _showMessage(
+                                    'A private receipt could not be uploaded. Retry when connected.',
+                                  );
+                                }
+                              }
+                            },
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: Text(
+                        receipts.length >= 5
+                            ? 'Receipt limit reached'
+                            : 'Add receipt images',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _viewReceipt(ExpenseReceipt receipt) async {
+    try {
+      final bytes = await ref
+          .read(budgetRepositoryProvider)
+          .downloadReceipt(receipt.objectPath);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => Dialog(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720, maxHeight: 720),
+              child: Image.memory(bytes, fit: BoxFit.contain),
+            ),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) _showMessage('That private receipt could not be opened.');
+    }
+  }
+
+  void _showMessage(String message) =>
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+}
+
+class _MonthSelector extends StatelessWidget {
+  const _MonthSelector({required this.month, required this.onMove});
+  final DateTime month;
+  final ValueChanged<int> onMove;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    padding: 12,
+    child: Row(
+      children: [
+        IconButton(
+          tooltip: 'Previous month',
+          onPressed: () => onMove(-1),
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        Expanded(
+          child: Text(
+            '${_monthName(month.month)} ${month.year}',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        IconButton(
+          tooltip: 'Next month',
+          onPressed: () => onMove(1),
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+      ],
+    ),
+  );
+}
+
+class _BudgetSummary extends StatelessWidget {
+  const _BudgetSummary({
+    required this.snapshot,
+    required this.saving,
+    required this.onEditBudget,
+    required this.onAddExpense,
+    required this.onAddRecurring,
+  });
+  final BudgetSnapshot snapshot;
+  final bool saving;
+  final VoidCallback onEditBudget;
+  final VoidCallback onAddExpense;
+  final VoidCallback onAddRecurring;
+
+  @override
+  Widget build(BuildContext context) {
+    final budget = snapshot.budget!;
+    final spent = snapshot.totalSpent;
+    final fraction = budget.limitMinor == 0
+        ? 0.0
+        : (spent / budget.limitMinor).clamp(0.0, 1.0);
+    final exceeded = snapshot.remaining < 0;
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Monthly overview',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Edit monthly budget',
+                onPressed: saving ? null : onEditBudget,
+                icon: const Icon(Icons.edit_outlined),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: AppSpace.lg,
+            runSpacing: AppSpace.md,
+            children: [
+              _Metric(
+                label: 'Budget',
+                value: ExactMoney(budget.limitMinor, budget.currency).format(),
+              ),
+              _Metric(
+                label: 'Spent',
+                value: ExactMoney(spent, budget.currency).format(),
+              ),
+              _Metric(
+                label: exceeded ? 'Over budget' : 'Remaining',
+                value: ExactMoney(
+                  snapshot.remaining.abs(),
+                  budget.currency,
+                ).format(),
+                danger: exceeded,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(100),
+            child: LinearProgressIndicator(
+              minHeight: 10,
+              value: fraction,
+              color: exceeded
+                  ? Theme.of(context).colorScheme.error
+                  : Theme.of(context).colorScheme.primary,
+              backgroundColor: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: saving ? null : onAddExpense,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Add expense'),
+              ),
+              OutlinedButton.icon(
+                onPressed: saving ? null : onAddRecurring,
+                icon: const Icon(Icons.repeat_rounded),
+                label: const Text('Recurring expense'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Metric extends StatelessWidget {
+  const _Metric({
+    required this.label,
+    required this.value,
+    this.danger = false,
+  });
+  final String label;
+  final String value;
+  final bool danger;
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(minWidth: 145),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 5),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: danger ? Theme.of(context).colorScheme.error : null,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CategoryOverview extends StatelessWidget {
+  const _CategoryOverview({required this.snapshot, required this.onLimit});
+  final BudgetSnapshot snapshot;
+  final ValueChanged<BudgetCategory> onLimit;
+
+  @override
+  Widget build(BuildContext context) {
+    final budget = snapshot.budget!;
+    final totals = <BudgetCategory, int>{};
+    for (final item in snapshot.expenses) {
+      totals.update(
+        item.category,
+        (value) => value + item.amountMinor,
+        ifAbsent: () => item.amountMinor,
+      );
+    }
+    final categories = BudgetCategory.values
+        .where(
+          (category) =>
+              totals.containsKey(category) ||
+              budget.categoryLimits.containsKey(category),
+        )
+        .toList();
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('By category', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 10),
+          if (categories.isEmpty)
+            const Text('Category spending will appear after you add expenses.')
+          else
+            for (final category in categories)
+              _CategoryBar(
+                category: category,
+                spent: totals[category] ?? 0,
+                limit: budget.categoryLimits[category],
+                totalLimit: budget.limitMinor,
+                currency: budget.currency,
+                onLimit: () => onLimit(category),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryBar extends StatelessWidget {
+  const _CategoryBar({
+    required this.category,
+    required this.spent,
+    required this.limit,
+    required this.totalLimit,
+    required this.currency,
+    required this.onLimit,
+  });
+  final BudgetCategory category;
+  final int spent;
+  final int? limit;
+  final int totalLimit;
+  final CurrencyUnit currency;
+  final VoidCallback onLimit;
+  @override
+  Widget build(BuildContext context) {
+    final fraction = (limit ?? totalLimit) <= 0
+        ? 0.0
+        : (spent / (limit ?? totalLimit)).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: Text(category.label)),
+                    IconButton(
+                      tooltip: 'Set ${category.label} limit',
+                      onPressed: onLimit,
+                      icon: const Icon(Icons.tune_rounded, size: 18),
+                    ),
+                  ],
+                ),
+                LinearProgressIndicator(value: fraction, minHeight: 6),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            flex: 2,
+            child: Text(
+              '${ExactMoney(spent, currency).format()}${limit == null ? '' : ' / ${ExactMoney(limit!, currency).format()}'}',
+              textAlign: TextAlign.end,
+              maxLines: 2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecurringSection extends StatelessWidget {
+  const _RecurringSection({
+    required this.snapshot,
+    required this.onAdd,
+    required this.onRecord,
+  });
+  final BudgetSnapshot snapshot;
+  final VoidCallback onAdd;
+  final ValueChanged<RecurringExpenseRule> onRecord;
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Recurring expenses',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Add recurring expense',
+              onPressed: onAdd,
+              icon: const Icon(Icons.add_rounded),
+            ),
+          ],
+        ),
+        if (snapshot.recurringRules.isEmpty)
+          const Text(
+            'Schedules are reminders, not recorded spending. Record each occurrence when it happens.',
+          ),
+        for (final rule in snapshot.recurringRules)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(rule.title),
+            subtitle: Text(
+              '${rule.frequency} · ${rule.category.label} · ${ExactMoney(rule.amountMinor, rule.currency).format()}',
+            ),
+            trailing: TextButton(
+              onPressed: () => onRecord(rule),
+              child: const Text('Record'),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _ExpenseHistory extends StatelessWidget {
+  const _ExpenseHistory({
+    required this.snapshot,
+    required this.query,
+    required this.category,
+    required this.onQuery,
+    required this.onFilter,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onReceipts,
+  });
+  final BudgetSnapshot snapshot;
+  final String query;
+  final BudgetCategory? category;
+  final ValueChanged<String> onQuery;
+  final ValueChanged<BudgetCategory?> onFilter;
+  final ValueChanged<CoupleExpense> onEdit;
+  final ValueChanged<CoupleExpense> onDelete;
+  final ValueChanged<CoupleExpense> onReceipts;
+  @override
+  Widget build(BuildContext context) {
+    final members = {
+      for (final member in snapshot.members) member.userId: member.label,
+    };
+    final normalized = query.trim().toLowerCase();
+    final results = snapshot.expenses
+        .where(
+          (expense) =>
+              (category == null || expense.category == category) &&
+              (normalized.isEmpty ||
+                  '${expense.title} ${expense.description} ${expense.category.label}'
+                      .toLowerCase()
+                      .contains(normalized)),
+        )
+        .toList();
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Expense history',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              SizedBox(
+                width: 260,
+                child: TextField(
+                  onChanged: onQuery,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search_rounded),
+                    labelText: 'Search expenses',
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: DropdownButtonFormField<BudgetCategory?>(
+                  initialValue: category,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                  items: [
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('All categories'),
+                    ),
+                    for (final item in BudgetCategory.values)
+                      DropdownMenuItem(value: item, child: Text(item.label)),
+                  ],
+                  onChanged: onFilter,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (results.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                snapshot.expenses.isEmpty
+                    ? 'No expenses recorded for this month.'
+                    : 'No expenses match this search.',
+              ),
+            )
+          else
+            for (final expense in results)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  child: Icon(_categoryIcon(expense.category)),
+                ),
+                title: Text(expense.title),
+                subtitle: Text(
+                  '${_dateLabel(expense.occurredOn)} · ${expense.category.label} · Paid by ${members[expense.paidByUser] ?? 'partner'} · Split ${ExactMoney(expense.splitAMinor, expense.currency).format()} / ${ExactMoney(expense.splitBMinor, expense.currency).format()}',
+                ),
+                trailing: Wrap(
+                  children: [
+                    Text(
+                      ExactMoney(
+                        expense.amountMinor,
+                        expense.currency,
+                      ).format(),
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    IconButton(
+                      tooltip: 'Manage private receipts',
+                      onPressed: () => onReceipts(expense),
+                      icon: const Icon(Icons.receipt_long_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Edit expense',
+                      onPressed: () => onEdit(expense),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete expense',
+                      onPressed: () => onDelete(expense),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                  ],
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpenseFormDialog extends StatefulWidget {
+  const _ExpenseFormDialog({
+    required this.currency,
+    required this.monthStart,
+    required this.members,
+    this.expense,
+  });
+  final CurrencyUnit currency;
+  final DateTime monthStart;
+  final List<BudgetMember> members;
+  final CoupleExpense? expense;
+  @override
+  State<_ExpenseFormDialog> createState() => _ExpenseFormDialogState();
+}
+
+class _ExpenseFormDialogState extends State<_ExpenseFormDialog> {
+  late final TextEditingController _title;
+  late final TextEditingController _description;
+  late final TextEditingController _amount;
+  late final TextEditingController _splitA;
+  late final TextEditingController _splitB;
+  late DateTime _date;
+  late BudgetCategory _category;
+  late String _paidBy;
+  late String _splitMode;
+  String? _error;
+  @override
+  void initState() {
+    super.initState();
+    final value = widget.expense;
+    _title = TextEditingController(text: value?.title ?? '');
+    _description = TextEditingController(text: value?.description ?? '');
+    _amount = TextEditingController(
+      text: value == null
+          ? ''
+          : ExactMoney(
+              value.amountMinor,
+              widget.currency,
+            ).format().split(' ').first,
+    );
+    _splitA = TextEditingController(
+      text: value == null
+          ? ''
+          : ExactMoney(
+              value.splitAMinor,
+              widget.currency,
+            ).format().split(' ').first,
+    );
+    _splitB = TextEditingController(
+      text: value == null
+          ? ''
+          : ExactMoney(
+              value.splitBMinor,
+              widget.currency,
+            ).format().split(' ').first,
+    );
+    final now = DateTime.now();
+    _date =
+        value?.occurredOn ??
+        (now.year == widget.monthStart.year &&
+                now.month == widget.monthStart.month
+            ? now
+            : widget.monthStart);
+    _category = value?.category ?? BudgetCategory.other;
+    _paidBy = value?.paidByUser ?? widget.members.first.userId;
+    _splitMode = value?.splitMode ?? 'equal';
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _description.dispose();
+    _amount.dispose();
+    _splitA.dispose();
+    _splitB.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.expense == null ? 'Add expense' : 'Edit expense'),
+    content: SizedBox(
+      width: 480,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _title,
+              autofocus: true,
+              maxLength: 160,
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            TextField(
+              controller: _description,
+              maxLength: 2000,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Description (optional)',
+              ),
+            ),
+            TextField(
+              controller: _amount,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Amount (${widget.currency.code})',
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<BudgetCategory>(
+              initialValue: _category,
+              decoration: const InputDecoration(labelText: 'Category'),
+              items: [
+                for (final item in BudgetCategory.values)
+                  DropdownMenuItem(value: item, child: Text(item.label)),
+              ],
+              onChanged: (v) => setState(() => _category = v ?? _category),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _paidBy,
+              decoration: const InputDecoration(labelText: 'Paid by'),
+              items: [
+                for (final member in widget.members)
+                  DropdownMenuItem(
+                    value: member.userId,
+                    child: Text(member.label),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _paidBy = v ?? _paidBy),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _splitMode,
+              decoration: const InputDecoration(labelText: 'Split'),
+              items: const [
+                DropdownMenuItem(value: 'equal', child: Text('Equal split')),
+                DropdownMenuItem(value: 'custom', child: Text('Custom split')),
+              ],
+              onChanged: (v) => setState(() => _splitMode = v ?? 'equal'),
+            ),
+            if (_splitMode == 'custom') ...[
+              TextField(
+                controller: _splitA,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: '${widget.members[0].label} share',
+                ),
+              ),
+              TextField(
+                controller: _splitB,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: '${widget.members[1].label} share',
+                ),
+              ),
+            ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _chooseDate,
+                icon: const Icon(Icons.calendar_today_outlined),
+                label: Text(_dateLabel(_date)),
+              ),
+            ),
+            if (_error != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save expense')),
+    ],
+  );
+
+  Future<void> _chooseDate() async {
+    final next = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: widget.monthStart,
+      lastDate: DateTime(
+        widget.monthStart.year,
+        widget.monthStart.month + 1,
+        0,
+      ),
+    );
+    if (next != null) setState(() => _date = next);
+  }
+
+  void _save() {
+    final title = _title.text.trim();
+    final amount = ExactMoney.parse(_amount.text, widget.currency);
+    if (title.isEmpty || title.length > 160 || amount == null) {
+      setState(() => _error = 'Add a title and a valid exact amount.');
+      return;
+    }
+    final split = ExpenseSplit.parse(
+      totalMinor: amount,
+      currency: widget.currency,
+      equal: _splitMode == 'equal',
+      first: _splitA.text,
+      second: _splitB.text,
+    );
+    if (split == null) {
+      setState(
+        () =>
+            _error = 'The two exact shares must add up to the expense amount.',
+      );
+      return;
+    }
+    Navigator.pop(context, <String, dynamic>{
+      'title': title,
+      'description': _description.text.trim(),
+      'amount_minor': amount,
+      'occurred_on': _dateKey(_date),
+      'category_key': _category.key,
+      'paid_by_user': _paidBy,
+      'split_mode': _splitMode,
+      'split_a_user_id': widget.members[0].userId,
+      'split_a_minor': split.firstMinor,
+      'split_b_user_id': widget.members[1].userId,
+      'split_b_minor': split.secondMinor,
+    });
+  }
+}
+
+class _RecurringFormDialog extends StatefulWidget {
+  const _RecurringFormDialog({required this.currency, required this.members});
+  final CurrencyUnit currency;
+  final List<BudgetMember> members;
+  @override
+  State<_RecurringFormDialog> createState() => _RecurringFormDialogState();
+}
+
+class _RecurringFormDialogState extends State<_RecurringFormDialog> {
+  final _title = TextEditingController();
+  final _amount = TextEditingController();
+  late String _paidBy = widget.members.first.userId;
+  String _frequency = 'monthly';
+  BudgetCategory _category = BudgetCategory.other;
+  String? _error;
+  @override
+  void dispose() {
+    _title.dispose();
+    _amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Recurring expense schedule'),
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'A schedule is not recorded spending. Record each occurrence when it happens; duplicate dates are rejected.',
+          ),
+          TextField(
+            controller: _title,
+            decoration: const InputDecoration(labelText: 'Title'),
+          ),
+          TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Amount (${widget.currency.code})',
+            ),
+          ),
+          DropdownButtonFormField<BudgetCategory>(
+            initialValue: _category,
+            decoration: const InputDecoration(labelText: 'Category'),
+            items: [
+              for (final item in BudgetCategory.values)
+                DropdownMenuItem(value: item, child: Text(item.label)),
+            ],
+            onChanged: (value) =>
+                setState(() => _category = value ?? _category),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: _frequency,
+            decoration: const InputDecoration(labelText: 'Frequency'),
+            items: const [
+              DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+              DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+              DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+            ],
+            onChanged: (value) =>
+                setState(() => _frequency = value ?? 'monthly'),
+          ),
+          DropdownButtonFormField<String>(
+            initialValue: _paidBy,
+            decoration: const InputDecoration(labelText: 'Usually paid by'),
+            items: [
+              for (final member in widget.members)
+                DropdownMenuItem(
+                  value: member.userId,
+                  child: Text(member.label),
+                ),
+            ],
+            onChanged: (value) => setState(() => _paidBy = value ?? _paidBy),
+          ),
+          if (_error != null)
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save schedule')),
+    ],
+  );
+  void _save() {
+    final amount = ExactMoney.parse(_amount.text, widget.currency);
+    final title = _title.text.trim();
+    if (amount == null || title.isEmpty) {
+      setState(() => _error = 'Add a title and valid amount.');
+      return;
+    }
+    final a = amount ~/ 2;
+    Navigator.pop(context, <String, dynamic>{
+      'title': title,
+      'description': '',
+      'amount_minor': amount,
+      'currency_code': widget.currency.code,
+      'currency_exponent': widget.currency.exponent,
+      'category_key': _category.key,
+      'paid_by_user': _paidBy,
+      'split_a_user_id': widget.members[0].userId,
+      'split_a_minor': a,
+      'split_b_user_id': widget.members[1].userId,
+      'split_b_minor': amount - a,
+      'frequency': _frequency,
+      'starts_on': _dateKey(DateTime.now()),
+      'active': true,
+    });
+  }
+}
+
+class _BudgetFormDialog extends StatefulWidget {
+  const _BudgetFormDialog({
+    required this.initialCurrency,
+    required this.initialLimit,
+    required this.currencyLocked,
+  });
+  final CurrencyUnit initialCurrency;
+  final String initialLimit;
+  final bool currencyLocked;
+  @override
+  State<_BudgetFormDialog> createState() => _BudgetFormDialogState();
+}
+
+class _BudgetFormDialogState extends State<_BudgetFormDialog> {
+  late CurrencyUnit _currency = widget.initialCurrency;
+  late final TextEditingController _limit = TextEditingController(
+    text: widget.initialLimit,
+  );
+  String? _error;
+  @override
+  void dispose() {
+    _limit.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.initialLimit.isEmpty
+          ? 'Create monthly budget'
+          : 'Edit monthly budget',
+    ),
+    content: SizedBox(
+      width: 400,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<CurrencyUnit>(
+            initialValue: _currency,
+            decoration: const InputDecoration(labelText: 'Currency'),
+            items: [
+              for (final unit in CurrencyUnit.supported)
+                DropdownMenuItem(
+                  value: unit,
+                  child: Text('${unit.code} · ${unit.label}'),
+                ),
+            ],
+            onChanged: widget.currencyLocked
+                ? null
+                : (value) => setState(() => _currency = value ?? _currency),
+          ),
+          TextField(
+            controller: _limit,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Monthly limit (${_currency.code})',
+            ),
+          ),
+          if (widget.currencyLocked)
+            const Text(
+              'Currency is locked once this month has recorded expenses. Create a new month budget to use another currency.',
+            ),
+          if (_error != null)
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save budget')),
+    ],
+  );
+  void _save() {
+    if (_limit.text.trim().isEmpty) {
+      setState(() => _error = 'Enter a monthly limit.');
+      return;
+    }
+    final value = ExactMoney.parse(_limit.text, _currency);
+    if (value == null && _limit.text.trim() != '0') {
+      setState(() => _error = 'Enter an exact valid amount.');
+      return;
+    }
+    Navigator.pop(context, (currency: _currency, limit: value ?? 0));
+  }
+}
+
+class _BudgetEmpty extends StatelessWidget {
+  const _BudgetEmpty({required this.title, required this.body, this.action});
+  final String title;
+  final String body;
+  final Widget? action;
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          Icons.account_balance_wallet_outlined,
+          size: 32,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+        const SizedBox(height: 14),
+        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 8),
+        Text(body),
+        if (action != null) ...[const SizedBox(height: 16), action!],
+      ],
+    ),
+  );
+}
+
+class _BudgetNotice extends StatelessWidget {
+  const _BudgetNotice({
+    required this.message,
+    required this.isError,
+    this.action,
+  });
+  final String message;
+  final bool isError;
+  final Widget? action;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpace.sm),
+    child: Material(
+      color: isError
+          ? Theme.of(context).colorScheme.errorContainer
+          : Theme.of(context).colorScheme.secondaryContainer,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(child: Text(message)),
+            ?action,
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+String _monthName(int month) => const [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+][month - 1];
+String _dateLabel(DateTime value) =>
+    '${_monthName(value.month)} ${value.day}, ${value.year}';
+String _dateKey(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+IconData _categoryIcon(BudgetCategory category) => switch (category) {
+  BudgetCategory.housing => Icons.home_outlined,
+  BudgetCategory.food => Icons.restaurant_outlined,
+  BudgetCategory.transport => Icons.directions_car_outlined,
+  BudgetCategory.utilities => Icons.bolt_outlined,
+  BudgetCategory.health => Icons.health_and_safety_outlined,
+  BudgetCategory.travel => Icons.flight_outlined,
+  BudgetCategory.shopping => Icons.shopping_bag_outlined,
+  BudgetCategory.entertainment => Icons.movie_outlined,
+  BudgetCategory.other => Icons.receipt_long_outlined,
+};

@@ -1,13 +1,3 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-class ThemeModeController extends Notifier<ThemeMode> {
-  @override
-  ThemeMode build() => ThemeMode.system;
-
-  void setMode(ThemeMode mode) => state = mode;
-}
-
-final themeModeProvider = NotifierProvider<ThemeModeController, ThemeMode>(
-  ThemeModeController.new,
-);
+// Compatibility export for existing consumers of the theme-mode provider.
+export '../../features/appearance/application/appearance_controller.dart'
+    show themeModeProvider;

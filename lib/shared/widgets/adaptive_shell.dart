@@ -7,7 +7,7 @@ import '../../features/authentication/application/auth_controller.dart';
 import '../../features/shared_planner/application/shared_planner_controller.dart';
 import 'together_mark.dart';
 
-enum _UtilityDestination { studio, appearance }
+enum _UtilityDestination { memories, studio, appearance }
 
 class AdaptiveShell extends ConsumerWidget {
   const AdaptiveShell({
@@ -26,6 +26,7 @@ class AdaptiveShell extends ConsumerWidget {
     '/planner?tab=0',
     '/planner?tab=1',
     '/planner?tab=2',
+    '/budget',
   ];
   static const plannerLabels = [
     'Summary',
@@ -50,6 +51,7 @@ class AdaptiveShell extends ConsumerWidget {
   ];
 
   int? get selectedIndex {
+    if (path == '/budget') return 4;
     if (path == '/planner') {
       final tab = int.tryParse(queryParameters['tab'] ?? '0') ?? 0;
       return tab.clamp(0, 2) + 1;
@@ -64,6 +66,8 @@ class AdaptiveShell extends ConsumerWidget {
       _ => 'Bucket List',
     },
     '/search' => 'Search',
+    '/budget' => 'Budget',
+    '/memories' => 'Memories',
     '/studio' => 'Design Studio',
     '/settings' => 'Appearance',
     _ => 'Summary',
@@ -85,16 +89,13 @@ class AdaptiveShell extends ConsumerWidget {
       if (index < 4) {
         context.go(plannerPaths[index]);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Budget is planned for a later update.'),
-          ),
-        );
+        context.go('/budget');
       }
     }
 
     void navigateUtility(_UtilityDestination destination) {
       context.go(switch (destination) {
+        _UtilityDestination.memories => '/memories',
         _UtilityDestination.studio => '/studio',
         _UtilityDestination.appearance => '/settings',
       });
@@ -178,6 +179,10 @@ class AdaptiveShell extends ConsumerWidget {
             onSelected: navigateUtility,
             itemBuilder: (context) => const [
               PopupMenuItem(
+                value: _UtilityDestination.memories,
+                child: Text('Memories'),
+              ),
+              PopupMenuItem(
                 value: _UtilityDestination.studio,
                 child: Text('Design Studio'),
               ),
@@ -209,9 +214,7 @@ class AdaptiveShell extends ConsumerWidget {
               destinations: [
                 for (var i = 0; i < plannerLabels.length; i++)
                   NavigationDestination(
-                    tooltip: i == 4
-                        ? 'Budget, planned for later'
-                        : plannerLabels[i],
+                    tooltip: plannerLabels[i],
                     icon: Icon(plannerIcons[i]),
                     label: compactLabels[i],
                   ),
@@ -248,11 +251,8 @@ class AdaptiveShell extends ConsumerWidget {
                       destinations: [
                         for (var i = 0; i < plannerLabels.length; i++)
                           NavigationRailDestination(
-                            disabled: i == 4,
                             icon: Tooltip(
-                              message: i == 4
-                                  ? 'Budget, planned for later'
-                                  : plannerLabels[i],
+                              message: plannerLabels[i],
                               child: Icon(plannerIcons[i]),
                             ),
                             label: Text(plannerLabels[i]),
@@ -315,7 +315,6 @@ class _Sidebar extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: AppSpace.xs),
             child: ListTile(
               selected: i == selected,
-              enabled: i != 4,
               selectedTileColor: Theme.of(context)
                   .colorScheme
                   .secondaryContainer,
@@ -325,7 +324,6 @@ class _Sidebar extends StatelessWidget {
               ),
               leading: Icon(AdaptiveShell.plannerIcons[i]),
               title: Text(AdaptiveShell.plannerLabels[i]),
-              trailing: i == 4 ? const Icon(Icons.lock_outline_rounded) : null,
               onTap: i == 4 ? onBudget : () => onSelectPlanner(i),
             ),
           ),
@@ -337,6 +335,11 @@ class _Sidebar extends StatelessWidget {
           title: const Text('Search'),
           selected: ModalRoute.of(context)?.settings.name == '/search',
           onTap: () => context.go('/search'),
+        ),
+        ListTile(
+          leading: const Icon(Icons.photo_library_outlined),
+          title: const Text('Memories'),
+          onTap: () => onSelectUtility(_UtilityDestination.memories),
         ),
         ListTile(
           leading: const Icon(Icons.auto_awesome_outlined),

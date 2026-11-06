@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:supabase/supabase.dart';
 
 import '../../dashboard/domain/dashboard_preferences.dart';
+import '../../appearance/domain/appearance_preferences.dart';
+import '../../budget/domain/budget_models.dart';
+import '../../memories/domain/memory_models.dart';
 import '../domain/auth_repository.dart';
 import '../../partner_linking/domain/partner_invitation_repository.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
@@ -16,7 +19,10 @@ class SupabaseAuthRepository
         PartnerInvitationRepository,
         SharedPlannerRepository,
         DashboardPreferencesRepository,
-        ProfileRepository {
+        AppearancePreferencesRepository,
+        ProfileRepository,
+        BudgetRepository,
+        MemoriesRepository {
   SupabaseAuthRepository({
     required this._createClients,
     this.allowRealAccounts = false,
@@ -1030,6 +1036,672 @@ class SupabaseAuthRepository
       throw const DashboardPreferencesFailure();
     }
   }
+
+  @override
+  Future<AppearancePreferences?> loadAppearancePreferences(
+    String userId,
+  ) async {
+    final clients = _authorizedClients();
+    if (clients.validSession().user.id != userId) {
+      throw const AppearancePreferencesFailure();
+    }
+    try {
+      final row = await clients.data
+          .schema('public')
+          .from('user_dashboard_preferences')
+          .select('appearance_mode,appearance_theme,appearance_custom_hex')
+          .eq('user_id', userId)
+          .maybeSingle();
+      clients.validSession();
+      return row == null
+          ? null
+          : AppearancePreferences.fromJson(Map<String, dynamic>.from(row));
+    } catch (_) {
+      throw const AppearancePreferencesFailure();
+    }
+  }
+
+  @override
+  Future<void> saveAppearancePreferences(
+    String userId,
+    AppearancePreferences preferences,
+  ) async {
+    final clients = _authorizedClients();
+    if (clients.validSession().user.id != userId) {
+      throw const AppearancePreferencesFailure();
+    }
+    try {
+      await clients.data
+          .schema('public')
+          .from('user_dashboard_preferences')
+          .upsert({
+            'user_id': userId,
+            ...preferences.toJson(),
+          }, onConflict: 'user_id');
+      clients.validSession();
+    } catch (_) {
+      throw const AppearancePreferencesFailure();
+    }
+  }
+
+  @override
+  Future<BudgetSnapshot> loadBudget(String coupleId, DateTime month) async {
+    final clients = _authorizedClients();
+    if (coupleId.isEmpty) throw const SharedPlannerFailure();
+    try {
+      final data = clients.data.schema('public');
+      final monthStart = DateTime(month.year, month.month, 1);
+      final monthKey = _dateKey(monthStart);
+      final budgetRows = await data
+          .from('couple_budgets')
+          .select()
+          .eq('couple_id', coupleId)
+          .eq('month_start', monthKey)
+          .limit(1);
+      final members = await data
+          .from('couple_memberships')
+          .select('user_id,seat')
+          .eq('couple_id', coupleId)
+          .eq('state', 'active')
+          .order('seat');
+      final session = clients.validSession();
+      final memberList = (members as List)
+          .map((row) {
+            final map = Map<String, dynamic>.from(row);
+            final userId = map['user_id'] as String;
+            return BudgetMember(
+              userId: userId,
+              seat: (map['seat'] as num).toInt(),
+              label: userId == session.user.id
+                  ? 'You'
+                  : 'Partner ${map['seat'] == 1 ? '1' : '2'}',
+            );
+          })
+          .toList(growable: false);
+      CoupleBudget? budget;
+      final expenses = <CoupleExpense>[];
+      final rules = <RecurringExpenseRule>[];
+      if (budgetRows.isNotEmpty) {
+        final rawBudget = Map<String, dynamic>.from(budgetRows.first);
+        final budgetId = rawBudget['id'] as String;
+        final categoryRows = await data
+            .from('budget_category_limits')
+            .select('category_key,limit_minor')
+            .eq('couple_id', coupleId)
+            .eq('budget_id', budgetId);
+        final categories = <BudgetCategory, int>{};
+        for (final row in categoryRows) {
+          final map = Map<String, dynamic>.from(row);
+          categories[BudgetCategory.fromKey(map['category_key'])] =
+              (map['limit_minor'] as num).toInt();
+        }
+        budget = CoupleBudget.fromJson(rawBudget, categoryLimits: categories);
+        final expenseRows = await data
+            .from('couple_expenses')
+            .select()
+            .eq('couple_id', coupleId)
+            .eq('budget_id', budgetId)
+            .order('occurred_on', ascending: false)
+            .order('created_at', ascending: false);
+        expenses.addAll(
+          (expenseRows as List).map(
+            (row) => CoupleExpense.fromJson(Map<String, dynamic>.from(row)),
+          ),
+        );
+        final ruleRows = await data
+            .from('recurring_expense_rules')
+            .select()
+            .eq('couple_id', coupleId)
+            .eq('active', true)
+            .eq('currency_code', budget.currency.code)
+            .order('starts_on');
+        rules.addAll(
+          (ruleRows as List).map(
+            (row) =>
+                RecurringExpenseRule.fromJson(Map<String, dynamic>.from(row)),
+          ),
+        );
+      }
+      clients.validSession();
+      return BudgetSnapshot(
+        budget: budget,
+        expenses: List.unmodifiable(expenses),
+        recurringRules: List.unmodifiable(rules),
+        members: List.unmodifiable(memberList),
+      );
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveBudget(
+    String coupleId,
+    DateTime month,
+    CurrencyUnit currency,
+    int limitMinor,
+  ) async {
+    final clients = _authorizedClients();
+    if (limitMinor < 0 || limitMinor > ExactMoney.maximumMinor) {
+      throw const SharedPlannerFailure();
+    }
+    try {
+      await clients.data.schema('public').from('couple_budgets').upsert({
+        'couple_id': coupleId,
+        'month_start': _dateKey(DateTime(month.year, month.month, 1)),
+        'currency_code': currency.code,
+        'currency_exponent': currency.exponent,
+        'limit_minor': limitMinor,
+      }, onConflict: 'couple_id,month_start');
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveCategoryLimit(
+    String coupleId,
+    String budgetId,
+    BudgetCategory category,
+    int limitMinor,
+  ) async {
+    final clients = _authorizedClients();
+    if (limitMinor < 0 || limitMinor > ExactMoney.maximumMinor) {
+      throw const SharedPlannerFailure();
+    }
+    try {
+      await clients.data.schema('public').from('budget_category_limits').upsert(
+        {
+          'couple_id': coupleId,
+          'budget_id': budgetId,
+          'category_key': category.key,
+          'limit_minor': limitMinor,
+        },
+        onConflict: 'budget_id,category_key',
+      );
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveExpense(
+    String coupleId,
+    String budgetId,
+    CurrencyUnit currency,
+    Map<String, dynamic> values, {
+    String? expenseId,
+    int? expectedRevision,
+  }) async {
+    final clients = _authorizedClients();
+    try {
+      final table = clients.data.schema('public').from('couple_expenses');
+      if (expenseId == null) {
+        await table.insert({
+          ...values,
+          'couple_id': coupleId,
+          'budget_id': budgetId,
+          'currency_code': currency.code,
+          'currency_exponent': currency.exponent,
+        });
+      } else {
+        if (expectedRevision == null) throw const SharedPlannerFailure();
+        final result = await table
+            .update(values)
+            .eq('couple_id', coupleId)
+            .eq('id', expenseId)
+            .eq('revision', expectedRevision)
+            .select('id')
+            .maybeSingle();
+        if (result == null) throw const SharedPlannerFailure();
+      }
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> deleteExpense(String coupleId, CoupleExpense expense) async {
+    final clients = _authorizedClients();
+    try {
+      final result = await clients.data
+          .schema('public')
+          .rpc(
+            'delete_couple_expense',
+            params: {
+              'p_couple_id': coupleId,
+              'p_expense_id': expense.id,
+              'p_expected_revision': expense.revision,
+            },
+          );
+      clients.validSession();
+      if (result != true) throw const SharedPlannerFailure();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveRecurringRule(
+    String coupleId,
+    Map<String, dynamic> values,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      await clients.data
+          .schema('public')
+          .from('recurring_expense_rules')
+          .insert({...values, 'couple_id': coupleId});
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> recordRecurringOccurrence(
+    String coupleId,
+    String budgetId,
+    CurrencyUnit currency,
+    RecurringExpenseRule rule,
+    DateTime occurrence,
+  ) async {
+    final clients = _authorizedClients();
+    final date = DateTime(occurrence.year, occurrence.month, occurrence.day);
+    final splitA = rule.splitAMinor;
+    try {
+      await clients.data.schema('public').from('couple_expenses').insert({
+        'couple_id': coupleId,
+        'budget_id': budgetId,
+        'title': rule.title,
+        'description': rule.description,
+        'amount_minor': rule.amountMinor,
+        'currency_code': currency.code,
+        'currency_exponent': currency.exponent,
+        'occurred_on': _dateKey(date),
+        'category_key': rule.category.key,
+        'paid_by_user': rule.paidByUser,
+        'split_mode': 'custom',
+        'split_a_user_id': rule.splitAUserId,
+        'split_a_minor': splitA,
+        'split_b_user_id': rule.splitBUserId,
+        'split_b_minor': rule.splitBMinor,
+        'recurring_rule_id': rule.id,
+        'recurrence_key': _dateKey(date),
+      });
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<List<ExpenseReceipt>> loadReceipts(
+    String coupleId,
+    String expenseId,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      final rows = await clients.data
+          .schema('public')
+          .from('expense_receipts')
+          .select()
+          .eq('couple_id', coupleId)
+          .eq('expense_id', expenseId)
+          .order('created_at');
+      clients.validSession();
+      return List.unmodifiable(
+        (rows as List).map(
+          (row) => ExpenseReceipt.fromJson(Map<String, dynamic>.from(row)),
+        ),
+      );
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> uploadReceipt(
+    String coupleId,
+    String expenseId,
+    Uint8List bytes,
+    String contentType,
+  ) async {
+    final clients = _authorizedClients();
+    if (bytes.isEmpty ||
+        bytes.length > 10 * 1024 * 1024 ||
+        !{'image/jpeg', 'image/png', 'image/webp'}.contains(contentType)) {
+      throw const SharedPlannerFailure();
+    }
+    String? receiptId;
+    String? path;
+    try {
+      final row = await clients.data
+          .schema('public')
+          .from('expense_receipts')
+          .insert({
+            'couple_id': coupleId,
+            'expense_id': expenseId,
+            'content_type': contentType,
+            'byte_size': bytes.length,
+          })
+          .select('id,object_path')
+          .single();
+      receiptId = row['id'] as String;
+      path = row['object_path'] as String;
+      await clients.data.storage
+          .from('couple-receipts')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: false),
+          );
+      clients.validSession();
+    } catch (_) {
+      if (path != null) {
+        try {
+          await clients.data.storage.from('couple-receipts').remove([path]);
+          path = null;
+        } catch (_) {}
+      }
+      if (receiptId != null) {
+        try {
+          if (path == null) {
+            await clients.data
+                .schema('public')
+                .rpc(
+                  'delete_couple_expense_receipt',
+                  params: {'p_couple_id': coupleId, 'p_receipt_id': receiptId},
+                );
+          }
+        } catch (_) {}
+      }
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<Uint8List> downloadReceipt(String path) async {
+    final clients = _authorizedClients();
+    try {
+      final bytes = await clients.data.storage
+          .from('couple-receipts')
+          .download(path);
+      clients.validSession();
+      return bytes;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> deleteReceipt(ExpenseReceipt receipt) async {
+    final clients = _authorizedClients();
+    try {
+      await clients.data.storage.from('couple-receipts').remove([
+        receipt.objectPath,
+      ]);
+      final removed = await clients.data
+          .schema('public')
+          .rpc(
+            'delete_couple_expense_receipt',
+            params: {
+              'p_couple_id': receipt.coupleId,
+              'p_receipt_id': receipt.id,
+            },
+          );
+      if (removed != true) throw const SharedPlannerFailure();
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<MemoriesSnapshot> loadMemories(String coupleId) async {
+    final clients = _authorizedClients();
+    try {
+      final data = clients.data.schema('public');
+      final memoryRows = await data
+          .from('couple_memories')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('memory_on', ascending: false)
+          .order('created_at', ascending: false);
+      final attachmentRows = await data
+          .from('memory_attachments')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('created_at');
+      final dateRows = await data
+          .from('important_dates')
+          .select('id,title')
+          .eq('couple_id', coupleId)
+          .order('date_value');
+      final photosByMemory = <String, List<MemoryPhoto>>{};
+      for (final row in attachmentRows as List) {
+        final photo = MemoryPhoto.fromJson(Map<String, dynamic>.from(row));
+        photosByMemory.putIfAbsent(photo.memoryId, () => []).add(photo);
+      }
+      clients.validSession();
+      return MemoriesSnapshot(
+        memories: List.unmodifiable(
+          (memoryRows as List).map((row) {
+            final map = Map<String, dynamic>.from(row);
+            return CoupleMemory.fromJson(
+              map,
+              photos: photosByMemory[map['id']] ?? const [],
+            );
+          }),
+        ),
+        importantDates: List.unmodifiable(
+          (dateRows as List).map((row) {
+            final map = Map<String, dynamic>.from(row);
+            return (id: map['id'] as String, title: map['title'] as String);
+          }),
+        ),
+      );
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveMemory(
+    String coupleId,
+    Map<String, dynamic> values, {
+    String? memoryId,
+  }) async {
+    final clients = _authorizedClients();
+    try {
+      final table = clients.data.schema('public').from('couple_memories');
+      if (memoryId == null) {
+        values.remove('_revision');
+        await table.insert({...values, 'couple_id': coupleId});
+      } else {
+        final revision = values.remove('_revision');
+        if (revision is! int) throw const SharedPlannerFailure();
+        final result = await table
+            .update(values)
+            .eq('couple_id', coupleId)
+            .eq('id', memoryId)
+            .eq('revision', revision)
+            .select('id')
+            .maybeSingle();
+        if (result == null) throw const SharedPlannerFailure();
+      }
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> deleteMemory(String coupleId, CoupleMemory memory) async {
+    final clients = _authorizedClients();
+    try {
+      for (final photo in memory.photos) {
+        await clients.data.storage.from('couple-memories').remove([
+          photo.objectPath,
+        ]);
+        final removed = await clients.data
+            .schema('public')
+            .rpc(
+              'delete_couple_memory_attachment',
+              params: {'p_couple_id': coupleId, 'p_attachment_id': photo.id},
+            );
+        if (removed != true) throw const SharedPlannerFailure();
+      }
+      final result = await clients.data
+          .schema('public')
+          .rpc(
+            'delete_couple_memory',
+            params: {
+              'p_couple_id': coupleId,
+              'p_memory_id': memory.id,
+              'p_expected_revision': memory.revision,
+            },
+          );
+      clients.validSession();
+      if (result != true) throw const SharedPlannerFailure();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> toggleFavorite(String coupleId, CoupleMemory memory) async {
+    final clients = _authorizedClients();
+    try {
+      final row = await clients.data
+          .schema('public')
+          .from('couple_memories')
+          .update({'is_favorite': !memory.favorite})
+          .eq('couple_id', coupleId)
+          .eq('id', memory.id)
+          .eq('revision', memory.revision)
+          .select('id')
+          .maybeSingle();
+      if (row == null) throw const SharedPlannerFailure();
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> addPhotos(
+    String coupleId,
+    String memoryId,
+    List<({Uint8List bytes, String contentType})> photos,
+  ) async {
+    final clients = _authorizedClients();
+    if (photos.isEmpty || photos.length > 10) {
+      throw const SharedPlannerFailure();
+    }
+    for (final photo in photos) {
+      if (photo.bytes.isEmpty ||
+          photo.bytes.length > 15 * 1024 * 1024 ||
+          !{
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+          }.contains(photo.contentType)) {
+        throw const SharedPlannerFailure();
+      }
+      String? attachmentId;
+      String? path;
+      try {
+        final row = await clients.data
+            .schema('public')
+            .from('memory_attachments')
+            .insert({
+              'couple_id': coupleId,
+              'memory_id': memoryId,
+              'content_type': photo.contentType,
+              'byte_size': photo.bytes.length,
+            })
+            .select('id,object_path')
+            .single();
+        attachmentId = row['id'] as String;
+        path = row['object_path'] as String;
+        await clients.data.storage
+            .from('couple-memories')
+            .uploadBinary(
+              path,
+              photo.bytes,
+              fileOptions: FileOptions(
+                contentType: photo.contentType,
+                upsert: false,
+              ),
+            );
+        clients.validSession();
+      } catch (_) {
+        if (path != null) {
+          try {
+            await clients.data.storage.from('couple-memories').remove([path]);
+            path = null;
+          } catch (_) {}
+        }
+        if (attachmentId != null) {
+          try {
+            if (path == null) {
+              await clients.data
+                  .schema('public')
+                  .rpc(
+                    'delete_couple_memory_attachment',
+                    params: {
+                      'p_couple_id': coupleId,
+                      'p_attachment_id': attachmentId,
+                    },
+                  );
+            }
+          } catch (_) {}
+        }
+        throw const SharedPlannerFailure();
+      }
+    }
+  }
+
+  @override
+  Future<void> removePhoto(String coupleId, MemoryPhoto photo) async {
+    final clients = _authorizedClients();
+    try {
+      await clients.data.storage.from('couple-memories').remove([
+        photo.objectPath,
+      ]);
+      final removed = await clients.data
+          .schema('public')
+          .rpc(
+            'delete_couple_memory_attachment',
+            params: {'p_couple_id': coupleId, 'p_attachment_id': photo.id},
+          );
+      if (removed != true) throw const SharedPlannerFailure();
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<Uint8List> downloadPhoto(String objectPath) async {
+    final clients = _authorizedClients();
+    try {
+      final bytes = await clients.data.storage
+          .from('couple-memories')
+          .download(objectPath);
+      clients.validSession();
+      return bytes;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  static String _dateKey(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 
   Future<void> _discard(AuthSignal reason) async {
     _generation++;

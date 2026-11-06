@@ -48,11 +48,11 @@ void main() {
     );
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-    await tester.ensureVisible(find.text('System'));
-    await tester.tap(find.text('System'));
+    await tester.ensureVisible(find.text('System default'));
+    await tester.tap(find.text('System default'));
     await tester.pumpAndSettle();
     expect(
-      Theme.of(tester.element(find.text('System'))).brightness,
+      Theme.of(tester.element(find.text('System default'))).brightness,
       Brightness.dark,
     );
     await tester.tap(find.byTooltip('Back'));

@@ -1,25 +1,59 @@
 import 'package:flutter/material.dart';
 
+import '../../features/appearance/domain/appearance_preferences.dart';
 import 'design_tokens.dart';
 
 abstract final class AppTheme {
-  static ThemeData light() => _build(Brightness.light);
-  static ThemeData dark() => _build(Brightness.dark);
+  static ThemeData light([
+    AppearancePreferences preferences = const AppearancePreferences(),
+  ]) => _build(Brightness.light, preferences);
+  static ThemeData dark([
+    AppearancePreferences preferences = const AppearancePreferences(),
+  ]) => _build(Brightness.dark, preferences);
 
-  static ThemeData _build(Brightness brightness) {
+  static ThemeData _build(
+    Brightness brightness,
+    AppearancePreferences preferences,
+  ) {
     final dark = brightness == Brightness.dark;
+    var palette = AppearancePalettes.forTheme(preferences.theme, brightness);
+    final custom = preferences.customHex;
+    if (custom != null) {
+      final color = parseHexColor(custom);
+      if (color != null) {
+        palette = AppearancePalettes.withCustomPrimary(
+          palette,
+          color,
+          brightness,
+        );
+      }
+    }
     final colors = BrandColors(
-      canvas: dark ? const Color(0xFF17141C) : const Color(0xFFFAF8F6),
-      panel: dark ? const Color(0xFF231F2A) : const Color(0xFFFFFFFF),
-      border: dark ? const Color(0xFF443A4C) : const Color(0xFFE7DFE7),
-      heroStart: dark ? const Color(0xFF30243B) : const Color(0xFFF8EBED),
-      heroEnd: dark ? const Color(0xFF382530) : const Color(0xFFEDE7F8),
+      primary: palette.primary,
+      secondary: palette.secondary,
+      text: palette.text,
+      accent: palette.accent,
+      canvas: palette.background,
+      panel: palette.surface,
+      border: palette.border,
+      heroStart: palette.heroStart,
+      heroEnd: palette.heroEnd,
     );
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF8E3F62),
-      secondary: const Color(0xFF75528C),
+    final generated = ColorScheme.fromSeed(
+      seedColor: palette.primary,
       brightness: brightness,
-      surface: colors.panel,
+      surface: palette.surface,
+    );
+    final scheme = generated.copyWith(
+      primary: palette.primary,
+      onPrimary: _contrastText(palette.primary),
+      secondary: palette.secondary,
+      onSecondary: _contrastText(palette.secondary),
+      tertiary: palette.accent,
+      onTertiary: _contrastText(palette.accent),
+      surface: palette.surface,
+      onSurface: palette.text,
+      outline: palette.border,
     );
     final text =
         (dark
@@ -29,6 +63,7 @@ abstract final class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      primaryColor: palette.primary,
       extensions: [colors],
       scaffoldBackgroundColor: colors.canvas,
       visualDensity: VisualDensity.standard,
@@ -100,5 +135,12 @@ abstract final class AppTheme {
       ),
       dividerTheme: DividerThemeData(color: colors.border),
     );
+  }
+
+  static Color _contrastText(Color background) {
+    final luminance = background.computeLuminance();
+    final lightContrast = 1.05 / (luminance + .05);
+    final darkContrast = (luminance + .05) / .05;
+    return darkContrast >= lightContrast ? Colors.black : Colors.white;
   }
 }
