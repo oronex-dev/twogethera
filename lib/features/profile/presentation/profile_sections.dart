@@ -82,7 +82,7 @@ class _ProfileSectionsState extends ConsumerState<ProfileSections> {
                       _Avatar(bytes: null, label: profile.displayName),
                       const SizedBox(height: AppSpace.xs),
                       const Text(
-                        'Profile photos are unavailable in this private beta while secure storage is being verified.',
+                        'Profile photos are disabled in Private Beta V1.',
                         textAlign: TextAlign.center,
                       ),
                     ],

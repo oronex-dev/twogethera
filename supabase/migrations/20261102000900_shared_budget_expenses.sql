@@ -300,40 +300,20 @@ CREATE POLICY expense_receipts_owner_access ON public.expense_receipts FOR ALL T
 RESET ROLE;
 REVOKE CREATE ON SCHEMA public FROM twogethera_membership_owner;
 REVOKE ALL ON public.couple_budgets, public.budget_category_limits, public.recurring_expense_rules, public.couple_expenses, public.expense_receipts FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT ON public.couple_budgets, public.budget_category_limits, public.recurring_expense_rules, public.couple_expenses, public.expense_receipts TO authenticated;
+GRANT SELECT ON public.couple_budgets, public.budget_category_limits, public.recurring_expense_rules, public.couple_expenses TO authenticated;
 GRANT INSERT (couple_id,month_start,currency_code,currency_exponent,limit_minor) ON public.couple_budgets TO authenticated;
 GRANT UPDATE (couple_id,month_start,limit_minor,currency_code,currency_exponent) ON public.couple_budgets TO authenticated;
 GRANT INSERT (couple_id,budget_id,category_key,limit_minor) ON public.budget_category_limits TO authenticated;
 GRANT UPDATE (budget_id,category_key,limit_minor) ON public.budget_category_limits TO authenticated;
 GRANT INSERT (couple_id,title,description,amount_minor,currency_code,currency_exponent,category_key,paid_by_user,split_a_user_id,split_a_minor,split_b_user_id,split_b_minor,frequency,starts_on,ends_on,active) ON public.recurring_expense_rules TO authenticated;
 GRANT UPDATE (title,description,amount_minor,currency_code,currency_exponent,category_key,paid_by_user,split_a_user_id,split_a_minor,split_b_user_id,split_b_minor,frequency,starts_on,ends_on,active) ON public.recurring_expense_rules TO authenticated;
-GRANT INSERT (couple_id,budget_id,title,description,amount_minor,currency_code,currency_exponent,occurred_on,category_key,paid_by_user,split_mode,split_a_user_id,split_a_minor,split_b_user_id,split_b_minor,recurring_rule_id,recurrence_key,receipt_count) ON public.couple_expenses TO authenticated;
-GRANT UPDATE (title,description,amount_minor,occurred_on,category_key,paid_by_user,split_mode,split_a_user_id,split_a_minor,split_b_user_id,split_b_minor,receipt_count) ON public.couple_expenses TO authenticated;
-GRANT INSERT (couple_id,expense_id,content_type,byte_size) ON public.expense_receipts TO authenticated;
-GRANT DELETE ON public.expense_receipts TO authenticated;
+GRANT INSERT (couple_id,budget_id,title,description,amount_minor,currency_code,currency_exponent,occurred_on,category_key,paid_by_user,split_mode,split_a_user_id,split_a_minor,split_b_user_id,split_b_minor,recurring_rule_id,recurrence_key) ON public.couple_expenses TO authenticated;
+GRANT UPDATE (title,description,amount_minor,occurred_on,category_key,paid_by_user,split_mode,split_a_user_id,split_a_minor,split_b_user_id,split_b_minor) ON public.couple_expenses TO authenticated;
 REVOKE ALL ON FUNCTION public.delete_couple_expense(uuid,uuid,bigint) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.delete_couple_expense(uuid,uuid,bigint) TO authenticated;
 
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('couple-receipts', 'couple-receipts', false, 10485760, ARRAY['image/jpeg','image/png','image/webp']::text[])
-ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, public = false,
-  file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types;
-CREATE POLICY couple_receipts_storage_select ON storage.objects FOR SELECT TO authenticated
-USING (bucket_id = 'couple-receipts' AND EXISTS (
-  SELECT 1 FROM public.expense_receipts r
-  WHERE r.object_path = name AND app_private.can_read_shared_records(r.couple_id)
-));
-CREATE POLICY couple_receipts_storage_insert ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'couple-receipts' AND EXISTS (
-  SELECT 1 FROM public.expense_receipts r
-  WHERE r.object_path = name AND r.created_by = app_private.current_identity_is_verified(false)
-    AND app_private.can_read_shared_records(r.couple_id)
-));
-CREATE POLICY couple_receipts_storage_delete ON storage.objects FOR DELETE TO authenticated
-USING (bucket_id = 'couple-receipts' AND EXISTS (
-  SELECT 1 FROM public.expense_receipts r
-  WHERE r.object_path = name AND app_private.can_read_shared_records(r.couple_id)
-));
+-- Receipt metadata schema and integrity triggers remain for lifecycle
+-- compatibility, but client grants are intentionally absent in Private Beta V1.
 
 COMMIT;
 NOTIFY pgrst, 'reload schema';

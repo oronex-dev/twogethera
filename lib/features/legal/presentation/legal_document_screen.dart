@@ -110,23 +110,23 @@ class LegalDocumentLinks extends StatelessWidget {
 const _privacySections = <(String, String)>[
   (
     'Account and profile information',
-    'Sign-in uses Supabase Auth. A personal profile can contain a display name, a private About Me note, and a profile photo. The linked partner can see the display name and photo; the About Me note is owner-only.',
+    'Sign-in uses Supabase Auth. A personal profile can contain a display name and a private About Me note. The linked partner can see the display name; the About Me note is owner-only. Profile photos are disabled in Private Beta V1.',
   ),
   (
     'Shared couple information',
-    'Active partners can access shared planner items, dates, plans, tasks, date-night ideas and votes, goals and milestones, budget entries, memories, and associated attachments. Shared access is enforced by server-side membership checks and database policies.',
+    'Active partners can access shared planner items, dates, plans, tasks, date-night ideas and votes, goals and milestones, and budget entries. Memories and file attachments are unavailable in Private Beta V1. Shared access is enforced by server-side membership checks and database policies.',
   ),
   (
     'Personal preferences',
     'Appearance and dashboard preferences are stored on the individual account. They are not couple-wide settings and are protected by owner-only database access.',
   ),
   (
-    'Photos and attachments',
-    'Profile photos, memory media, and budget receipts use private Supabase Storage buckets. They are not intended to be public URLs; access follows the applicable account or active-couple authorization rules.',
+    'File storage',
+    'Profile photos, memory photos, and budget receipt attachments are disabled in Private Beta V1. The app does not upload or download files.',
   ),
   (
     'Retention, unlinking, and account deletion',
-    'Shared-content retention, archive access, privacy removal, and complete account-deletion procedures are not finalized. The app does not currently provide a self-service account-deletion control. This draft makes no promise of indefinite retention or immediate physical erasure.',
+    'Shared-content retention, archive access, privacy removal, and complete account-deletion procedures are not finalized. The app provides an account-deletion request control, but processing and removal are subject to those procedures. This draft makes no promise of indefinite retention or immediate physical erasure.',
   ),
   (
     'Before public launch',
@@ -141,7 +141,7 @@ const _termsSections = <(String, String)>[
   ),
   (
     'Your account and shared content',
-    'Use an account you control. Information you add to shared planner, goal, budget, date-night, memory, or attachment features may be visible to your active partner. Personal profile notes and appearance settings are kept in account-owned records.',
+    'Use an account you control. Information you add to shared planner, goal, budget, or date-night features may be visible to your active partner. Memories and file attachments are unavailable in Private Beta V1. Personal profile notes and appearance settings are kept in account-owned records.',
   ),
   (
     'Budget features',

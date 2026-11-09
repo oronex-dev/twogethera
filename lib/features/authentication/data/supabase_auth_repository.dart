@@ -21,6 +21,7 @@ class SupabaseAuthRepository
         AuthExperienceRepository,
         PrivateBetaAccountLifecycleRepository,
         PrivacyRemovalRepository,
+        RecentReauthenticationRepository,
         PartnerInvitationRepository,
         SharedPlannerRepository,
         SharedContentRecoveryRepository,
@@ -69,7 +70,7 @@ class SupabaseAuthRepository
     return clients;
   }
 
-  void _observeAcceptedSession(LocalAuthClients clients) {
+  void _observeAcceptedSession(LocalAuthClients clients, {bool notify = true}) {
     final session = clients.acceptedSession;
     final expiry = session?.expiresAt;
     if (expiry == null || _disposed || clients != _clients) return;
@@ -81,9 +82,57 @@ class SupabaseAuthRepository
       // validSession still rejects every data request after access expiry.
       if (!_disposed && clients == _clients) _changes.add(AuthSignal.expired);
     });
-    _changes.add(
-      clients.recoveryOnly ? AuthSignal.recoveryVerified : AuthSignal.signedIn,
-    );
+    if (notify) {
+      _changes.add(
+        clients.recoveryOnly
+            ? AuthSignal.recoveryVerified
+            : AuthSignal.signedIn,
+      );
+    }
+  }
+
+  @override
+  Future<void> reauthenticateWithPassword(String password) async {
+    final clients = _clients;
+    final current = clients?.acceptedSession;
+    if (clients == null ||
+        current == null ||
+        current.isExpired ||
+        clients.recoveryOnly ||
+        current.user.email == null ||
+        password.isEmpty) {
+      throw const AuthFailure(AuthProblem.reauthenticationFailed);
+    }
+    final version = _generation;
+    try {
+      // Use the Auth-managed email attached to the accepted session; callers
+      // cannot select another account or provide identity/reauth timestamps.
+      final response = await clients.auth
+          .signInWithPassword(email: current.user.email!, password: password)
+          .timeout(const Duration(seconds: 8));
+      _current(clients, version);
+      final fresh = response.session;
+      if (fresh == null || fresh.user.id != current.user.id) {
+        throw const AuthFailure(AuthProblem.reauthenticationFailed);
+      }
+      clients.acceptSession(fresh);
+      clients.validSession();
+      _observeAcceptedSession(clients, notify: false);
+    } on AuthFailure {
+      rethrow;
+    } on AuthException catch (error) {
+      _current(clients, version);
+      if (error.statusCode == '400' || error.statusCode == '401') {
+        throw const AuthFailure(AuthProblem.reauthenticationFailed);
+      }
+      throw const AuthFailure(AuthProblem.unavailable);
+    } on TimeoutException {
+      _current(clients, version);
+      throw const AuthFailure(AuthProblem.unavailable);
+    } catch (_) {
+      _current(clients, version);
+      throw const AuthFailure(AuthProblem.unavailable);
+    }
   }
 
   @override
@@ -687,17 +736,7 @@ class SupabaseAuthRepository
 
   @override
   Future<Uint8List?> downloadAvatar(String path) async {
-    final clients = _authorizedClients();
-    try {
-      clients.validSession();
-      final bytes = await clients.data.storage
-          .from('profile-photos')
-          .download(path);
-      clients.validSession();
-      return bytes;
-    } catch (_) {
-      throw const ProfileFailure();
-    }
+    throw const ProfileFailure();
   }
 
   @override
@@ -757,45 +796,12 @@ class SupabaseAuthRepository
     required String userId,
     required Uint8List bytes,
   }) async {
-    final clients = _authorizedClients();
-    if (clients.validSession().user.id != userId ||
-        bytes.isEmpty ||
-        bytes.length > 5 * 1024 * 1024) {
-      throw const ProfileFailure();
-    }
-    final path = '$userId/avatar';
-    try {
-      await clients.data.storage
-          .from('profile-photos')
-          .uploadBinary(
-            path,
-            bytes,
-            fileOptions: const FileOptions(
-              contentType: 'image/png',
-              // The object uses a stable per-user path; prevent browsers/CDN
-              // caches from serving the prior image after an upsert.
-              cacheControl: '0',
-              upsert: true,
-            ),
-          );
-      clients.validSession();
-      return path;
-    } catch (_) {
-      throw const ProfileFailure();
-    }
+    throw const ProfileFailure();
   }
 
   @override
   Future<void> removeMyAvatar(String path) async {
-    final clients = _authorizedClients();
-    final userId = clients.validSession().user.id;
-    if (path != '$userId/avatar') throw const ProfileFailure();
-    try {
-      await clients.data.storage.from('profile-photos').remove([path]);
-      clients.validSession();
-    } catch (_) {
-      throw const ProfileFailure();
-    }
+    throw const ProfileFailure();
   }
 
   @override
@@ -1669,128 +1675,6 @@ class SupabaseAuthRepository
   }
 
   @override
-  Future<List<ExpenseReceipt>> loadReceipts(
-    String coupleId,
-    String expenseId,
-  ) async {
-    final clients = _authorizedClients();
-    try {
-      final rows = await clients.data
-          .schema('public')
-          .from('expense_receipts')
-          .select()
-          .eq('couple_id', coupleId)
-          .eq('expense_id', expenseId)
-          .order('created_at');
-      clients.validSession();
-      return List.unmodifiable(
-        (rows as List).map(
-          (row) => ExpenseReceipt.fromJson(Map<String, dynamic>.from(row)),
-        ),
-      );
-    } catch (_) {
-      throw const SharedPlannerFailure();
-    }
-  }
-
-  @override
-  Future<void> uploadReceipt(
-    String coupleId,
-    String expenseId,
-    Uint8List bytes,
-    String contentType,
-  ) async {
-    final clients = _authorizedClients();
-    if (bytes.isEmpty ||
-        bytes.length > 10 * 1024 * 1024 ||
-        !{'image/jpeg', 'image/png', 'image/webp'}.contains(contentType)) {
-      throw const SharedPlannerFailure();
-    }
-    String? receiptId;
-    String? path;
-    try {
-      final row = await clients.data
-          .schema('public')
-          .from('expense_receipts')
-          .insert({
-            'couple_id': coupleId,
-            'expense_id': expenseId,
-            'content_type': contentType,
-            'byte_size': bytes.length,
-          })
-          .select('id,object_path')
-          .single();
-      receiptId = row['id'] as String;
-      path = row['object_path'] as String;
-      await clients.data.storage
-          .from('couple-receipts')
-          .uploadBinary(
-            path,
-            bytes,
-            fileOptions: FileOptions(contentType: contentType, upsert: false),
-          );
-      clients.validSession();
-    } catch (_) {
-      if (path != null) {
-        try {
-          await clients.data.storage.from('couple-receipts').remove([path]);
-          path = null;
-        } catch (_) {}
-      }
-      if (receiptId != null) {
-        try {
-          if (path == null) {
-            await clients.data
-                .schema('public')
-                .rpc(
-                  'delete_couple_expense_receipt',
-                  params: {'p_couple_id': coupleId, 'p_receipt_id': receiptId},
-                );
-          }
-        } catch (_) {}
-      }
-      throw const SharedPlannerFailure();
-    }
-  }
-
-  @override
-  Future<Uint8List> downloadReceipt(String path) async {
-    final clients = _authorizedClients();
-    try {
-      final bytes = await clients.data.storage
-          .from('couple-receipts')
-          .download(path);
-      clients.validSession();
-      return bytes;
-    } catch (_) {
-      throw const SharedPlannerFailure();
-    }
-  }
-
-  @override
-  Future<void> deleteReceipt(ExpenseReceipt receipt) async {
-    final clients = _authorizedClients();
-    try {
-      await clients.data.storage.from('couple-receipts').remove([
-        receipt.objectPath,
-      ]);
-      final removed = await clients.data
-          .schema('public')
-          .rpc(
-            'delete_couple_expense_receipt',
-            params: {
-              'p_couple_id': receipt.coupleId,
-              'p_receipt_id': receipt.id,
-            },
-          );
-      if (removed != true) throw const SharedPlannerFailure();
-      clients.validSession();
-    } catch (_) {
-      throw const SharedPlannerFailure();
-    }
-  }
-
-  @override
   Future<MemoriesSnapshot> loadMemories(String coupleId) async {
     final clients = _authorizedClients();
     try {
@@ -1801,30 +1685,17 @@ class SupabaseAuthRepository
           .eq('couple_id', coupleId)
           .order('memory_on', ascending: false)
           .order('created_at', ascending: false);
-      final attachmentRows = await data
-          .from('memory_attachments')
-          .select()
-          .eq('couple_id', coupleId)
-          .order('created_at');
       final dateRows = await data
           .from('important_dates')
           .select('id,title')
           .eq('couple_id', coupleId)
           .order('date_value');
-      final photosByMemory = <String, List<MemoryPhoto>>{};
-      for (final row in attachmentRows as List) {
-        final photo = MemoryPhoto.fromJson(Map<String, dynamic>.from(row));
-        photosByMemory.putIfAbsent(photo.memoryId, () => []).add(photo);
-      }
       clients.validSession();
       return MemoriesSnapshot(
         memories: List.unmodifiable(
           (memoryRows as List).map((row) {
             final map = Map<String, dynamic>.from(row);
-            return CoupleMemory.fromJson(
-              map,
-              photos: photosByMemory[map['id']] ?? const [],
-            );
+            return CoupleMemory.fromJson(map, photos: const []);
           }),
         ),
         importantDates: List.unmodifiable(
@@ -1873,18 +1744,7 @@ class SupabaseAuthRepository
   Future<void> deleteMemory(String coupleId, CoupleMemory memory) async {
     final clients = _authorizedClients();
     try {
-      for (final photo in memory.photos) {
-        await clients.data.storage.from('couple-memories').remove([
-          photo.objectPath,
-        ]);
-        final removed = await clients.data
-            .schema('public')
-            .rpc(
-              'delete_couple_memory_attachment',
-              params: {'p_couple_id': coupleId, 'p_attachment_id': photo.id},
-            );
-        if (removed != true) throw const SharedPlannerFailure();
-      }
+      if (memory.photos.isNotEmpty) throw const SharedPlannerFailure();
       final result = await clients.data
           .schema('public')
           .rpc(
@@ -1928,106 +1788,17 @@ class SupabaseAuthRepository
     String memoryId,
     List<({Uint8List bytes, String contentType})> photos,
   ) async {
-    final clients = _authorizedClients();
-    if (photos.isEmpty || photos.length > 10) {
-      throw const SharedPlannerFailure();
-    }
-    for (final photo in photos) {
-      if (photo.bytes.isEmpty ||
-          photo.bytes.length > 15 * 1024 * 1024 ||
-          !{
-            'image/jpeg',
-            'image/png',
-            'image/webp',
-          }.contains(photo.contentType)) {
-        throw const SharedPlannerFailure();
-      }
-      String? attachmentId;
-      String? path;
-      try {
-        final row = await clients.data
-            .schema('public')
-            .from('memory_attachments')
-            .insert({
-              'couple_id': coupleId,
-              'memory_id': memoryId,
-              'content_type': photo.contentType,
-              'byte_size': photo.bytes.length,
-            })
-            .select('id,object_path')
-            .single();
-        attachmentId = row['id'] as String;
-        path = row['object_path'] as String;
-        await clients.data.storage
-            .from('couple-memories')
-            .uploadBinary(
-              path,
-              photo.bytes,
-              fileOptions: FileOptions(
-                contentType: photo.contentType,
-                upsert: false,
-              ),
-            );
-        clients.validSession();
-      } catch (_) {
-        if (path != null) {
-          try {
-            await clients.data.storage.from('couple-memories').remove([path]);
-            path = null;
-          } catch (_) {}
-        }
-        if (attachmentId != null) {
-          try {
-            if (path == null) {
-              await clients.data
-                  .schema('public')
-                  .rpc(
-                    'delete_couple_memory_attachment',
-                    params: {
-                      'p_couple_id': coupleId,
-                      'p_attachment_id': attachmentId,
-                    },
-                  );
-            }
-          } catch (_) {}
-        }
-        throw const SharedPlannerFailure();
-      }
-    }
+    throw const SharedPlannerFailure();
   }
 
   @override
   Future<void> removePhoto(String coupleId, MemoryPhoto photo) async {
-    final clients = _authorizedClients();
-    try {
-      await clients.data.storage.from('couple-memories').remove([
-        photo.objectPath,
-      ]);
-      final removed = await clients.data
-          .schema('public')
-          .rpc(
-            'delete_couple_memory_attachment',
-            params: {'p_couple_id': coupleId, 'p_attachment_id': photo.id},
-          );
-      if (removed != true) throw const SharedPlannerFailure();
-      clients.validSession();
-    } catch (_) {
-      throw const SharedPlannerFailure();
-    }
+    throw const SharedPlannerFailure();
   }
 
   @override
   Future<Uint8List> downloadPhoto(String objectPath) async {
-    final clients = _authorizedClients();
-    try {
-      final bytes = await clients.data.storage
-          .from('couple-memories')
-          .download(objectPath);
-      clients.validSession();
-      return bytes;
-    } catch (_) {
-      throw const SharedPlannerFailure();
-    }
+    throw const SharedPlannerFailure();
   }
 
   Future<String> _runRevisionCommand(

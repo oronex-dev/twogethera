@@ -7,7 +7,7 @@ import '../../features/authentication/application/auth_controller.dart';
 import '../../features/shared_planner/application/shared_planner_controller.dart';
 import 'together_mark.dart';
 
-enum _UtilityDestination { memories, dateNights, goals, studio, appearance }
+enum _UtilityDestination { dateNights, goals, studio, appearance }
 
 class AdaptiveShell extends ConsumerWidget {
   const AdaptiveShell({
@@ -67,7 +67,6 @@ class AdaptiveShell extends ConsumerWidget {
     },
     '/search' => 'Search',
     '/budget' => 'Budget',
-    '/memories' => 'Memories',
     '/date-nights' => 'Date nights',
     '/goals' => 'Shared goals',
     '/studio' => 'Design Studio',
@@ -97,7 +96,6 @@ class AdaptiveShell extends ConsumerWidget {
 
     void navigateUtility(_UtilityDestination destination) {
       context.go(switch (destination) {
-        _UtilityDestination.memories => '/memories',
         _UtilityDestination.dateNights => '/date-nights',
         _UtilityDestination.goals => '/goals',
         _UtilityDestination.studio => '/studio',
@@ -182,10 +180,6 @@ class AdaptiveShell extends ConsumerWidget {
             tooltip: 'More options',
             onSelected: navigateUtility,
             itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: _UtilityDestination.memories,
-                child: Text('Memories'),
-              ),
               PopupMenuItem(
                 value: _UtilityDestination.dateNights,
                 child: Text('Date nights'),
@@ -347,11 +341,6 @@ class _Sidebar extends StatelessWidget {
           title: const Text('Search'),
           selected: ModalRoute.of(context)?.settings.name == '/search',
           onTap: () => context.go('/search'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.photo_library_outlined),
-          title: const Text('Memories'),
-          onTap: () => onSelectUtility(_UtilityDestination.memories),
         ),
         ListTile(
           leading: const Icon(Icons.favorite_outline_rounded),

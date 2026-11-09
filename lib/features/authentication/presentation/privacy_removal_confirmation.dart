@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../application/auth_controller.dart';
 import '../domain/auth_repository.dart';
+import 'recent_reauthentication_dialog.dart';
 
 Future<void> confirmPrivacyRemoval(
   BuildContext context,
@@ -36,16 +37,72 @@ Future<void> confirmPrivacyRemoval(
   if (accepted != true || !context.mounted) return;
 
   final repository = ref.read(authRepositoryProvider);
-  try {
-    if (repository is! PrivacyRemovalRepository) {
-      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+  if (repository is! PrivacyRemovalRepository) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            const AuthFailure(AuthProblem.lifecycleUnavailable).message,
+          ),
+        ),
+      );
     }
-    await (repository as PrivacyRemovalRepository).requestPrivacyRemoval(
+    return;
+  }
+  final privacyRepository = repository as PrivacyRemovalRepository;
+  Future<void> submit() async {
+    await privacyRepository.requestPrivacyRemoval(
       table: table,
       recordId: recordId,
       field: field,
       removeRecord: field == null,
     );
+  }
+
+  try {
+    await submit();
+  } on AuthFailure catch (error) {
+    if (error.problem == AuthProblem.reauthenticationRequired &&
+        context.mounted &&
+        await requestRecentPasswordReauthentication(context, ref) &&
+        context.mounted) {
+      try {
+        await submit();
+      } on AuthFailure catch (retryError) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(retryError.message)));
+        }
+        return;
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('The privacy request could not be submitted.'),
+            ),
+          );
+        }
+        return;
+      }
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('The privacy request could not be submitted.'),
+        ),
+      );
+    }
+    return;
+  }
+
+  try {
     await onSubmitted();
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -57,11 +114,6 @@ Future<void> confirmPrivacyRemoval(
           ),
         ),
       );
-    }
-  } on AuthFailure catch (error) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error.message)));
     }
   } catch (_) {
     if (context.mounted) {

@@ -1,10 +1,9 @@
--- CP-011 Phase 5: paired-only memories with private authenticated media.
--- Objects are never public and no signed bearer URL is issued by the client.
+-- CP-011 Phase 5 schema is retained for lifecycle compatibility. Memories and
+-- media are disabled in Private Beta V1; authenticated clients receive no
+-- table or RPC access and no Storage is provisioned.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
-GRANT USAGE ON SCHEMA storage TO twogethera_membership_owner;
-GRANT EXECUTE ON FUNCTION storage.foldername(text) TO twogethera_membership_owner;
 GRANT CREATE ON SCHEMA public TO twogethera_membership_owner;
 SET LOCAL ROLE twogethera_membership_owner;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
@@ -120,35 +119,10 @@ ALTER FUNCTION public.delete_couple_memory(uuid,uuid,bigint) OWNER TO twogethera
 RESET ROLE;
 REVOKE CREATE ON SCHEMA public FROM twogethera_membership_owner;
 REVOKE ALL ON public.couple_memories, public.memory_attachments FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT ON public.couple_memories, public.memory_attachments TO authenticated;
-GRANT INSERT (couple_id,title,caption,personal_notes,memory_on,category_key,tags,is_favorite,important_date_id) ON public.couple_memories TO authenticated;
-GRANT UPDATE (title,caption,personal_notes,memory_on,category_key,tags,is_favorite,important_date_id) ON public.couple_memories TO authenticated;
-GRANT INSERT (couple_id,memory_id,content_type,byte_size) ON public.memory_attachments TO authenticated;
-GRANT DELETE ON public.memory_attachments TO authenticated;
-REVOKE ALL ON FUNCTION public.delete_couple_memory(uuid,uuid,bigint) FROM PUBLIC, anon, service_role;
-GRANT EXECUTE ON FUNCTION public.delete_couple_memory(uuid,uuid,bigint) TO authenticated;
-
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('couple-memories', 'couple-memories', false, 15728640, ARRAY['image/jpeg','image/png','image/webp']::text[])
-ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, public = false,
-  file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types;
-
-CREATE POLICY couple_memories_storage_select ON storage.objects FOR SELECT TO authenticated
-USING (bucket_id = 'couple-memories' AND EXISTS (
-  SELECT 1 FROM public.memory_attachments a
-  WHERE a.object_path = name AND app_private.can_read_shared_records(a.couple_id)
-));
-CREATE POLICY couple_memories_storage_insert ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'couple-memories' AND EXISTS (
-  SELECT 1 FROM public.memory_attachments a
-  WHERE a.object_path = name AND a.created_by = app_private.current_identity_is_verified(false)
-    AND app_private.can_read_shared_records(a.couple_id)
-));
-CREATE POLICY couple_memories_storage_delete ON storage.objects FOR DELETE TO authenticated
-USING (bucket_id = 'couple-memories' AND EXISTS (
-  SELECT 1 FROM public.memory_attachments a
-  WHERE a.object_path = name AND app_private.can_read_shared_records(a.couple_id)
-));
+REVOKE ALL ON FUNCTION public.delete_couple_memory(uuid,uuid,bigint)
+  FROM PUBLIC, anon, authenticated, service_role;
+-- Memory and attachment metadata remain for existing lifecycle and privacy
+-- routines only. There is no authenticated read/write or deletion surface.
 
 COMMIT;
 NOTIFY pgrst, 'reload schema';

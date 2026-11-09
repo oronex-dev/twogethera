@@ -47,7 +47,10 @@ BEGIN
   v_claims:=jsonb_build_object(
     'sub',v_a,'role','authenticated',
     'exp',floor(extract(epoch FROM statement_timestamp()))::bigint+600,
-    'auth_time',floor(extract(epoch FROM statement_timestamp()))::bigint
+    'amr',jsonb_build_array(jsonb_build_object(
+      'method','password',
+      'timestamp',floor(extract(epoch FROM statement_timestamp()))::bigint
+    ))
   );
   PERFORM set_config('request.jwt.claims',v_claims::text,true);
   PERFORM set_config('request.jwt.claim.sub',v_a::text,true);
@@ -85,7 +88,10 @@ BEGIN
   PERFORM set_config('request.jwt.claims',jsonb_build_object(
     'sub',v_b,'role','authenticated',
     'exp',floor(extract(epoch FROM statement_timestamp()))::bigint+600,
-    'auth_time',floor(extract(epoch FROM statement_timestamp()))::bigint
+    'amr',jsonb_build_array(jsonb_build_object(
+      'method','password',
+      'timestamp',floor(extract(epoch FROM statement_timestamp()))::bigint
+    ))
   )::text,true);
   PERFORM set_config('request.jwt.claim.sub',v_b::text,true);
   IF NOT EXISTS (SELECT 1 FROM public.bucket_list_items
@@ -107,7 +113,10 @@ BEGIN
   PERFORM set_config('request.jwt.claims',jsonb_build_object(
     'sub',v_a,'role','authenticated',
     'exp',floor(extract(epoch FROM statement_timestamp()))::bigint+600,
-    'auth_time',floor(extract(epoch FROM statement_timestamp()))::bigint
+    'amr',jsonb_build_array(jsonb_build_object(
+      'method','password',
+      'timestamp',floor(extract(epoch FROM statement_timestamp()))::bigint
+    ))
   )::text,true);
   PERFORM set_config('request.jwt.claim.sub',v_a::text,true);
   v_first:=public.close_my_couple_space(v_operation);
@@ -129,7 +138,10 @@ BEGIN
   PERFORM set_config('request.jwt.claims',jsonb_build_object(
     'sub',v_b,'role','authenticated',
     'exp',floor(extract(epoch FROM statement_timestamp()))::bigint+600,
-    'auth_time',floor(extract(epoch FROM statement_timestamp()))::bigint
+    'amr',jsonb_build_array(jsonb_build_object(
+      'method','password',
+      'timestamp',floor(extract(epoch FROM statement_timestamp()))::bigint
+    ))
   )::text,true);
   PERFORM set_config('request.jwt.claim.sub',v_b::text,true);
   IF EXISTS (SELECT 1 FROM public.bucket_list_items) THEN
@@ -139,7 +151,10 @@ BEGIN
   PERFORM set_config('request.jwt.claims',jsonb_build_object(
     'sub',v_c,'role','authenticated',
     'exp',floor(extract(epoch FROM statement_timestamp()))::bigint+600,
-    'auth_time',floor(extract(epoch FROM statement_timestamp()))::bigint
+    'amr',jsonb_build_array(jsonb_build_object(
+      'method','password',
+      'timestamp',floor(extract(epoch FROM statement_timestamp()))::bigint
+    ))
   )::text,true);
   PERFORM set_config('request.jwt.claim.sub',v_c::text,true);
   IF EXISTS (SELECT 1 FROM public.bucket_list_items)

@@ -45,39 +45,35 @@ Deno.serve(async (request) => {
     required('SUPABASE_SERVICE_ROLE_KEY'),
     { auth: { autoRefreshToken: false, persistSession: false } },
   );
-  try {
-    const { data: requestIds, error: claimError } = await admin.rpc(
-      'claim_due_account_deletion_ids',
-      { p_limit: 20 },
-    );
-    if (claimError) {
-      return Response.json({ code: 'maintenance_unavailable' }, { status: 503 });
-    }
-
-    let deletionsCompleted = 0;
-    let deletionsFailed = 0;
-    for (const requestId of (requestIds ?? []) as string[]) {
-      const result = await processAccountDeletion(admin, requestId);
-      if (result === 'completed') deletionsCompleted++;
-      else if (result === 'failed') deletionsFailed++;
-    }
-
-    const purge = await processLifecyclePurgeBatch(admin);
-    const { data: auditPurged, error: auditError } = await admin.rpc(
-      'purge_expired_financial_audit',
-    );
-    if (auditError) {
-      return Response.json({ code: 'maintenance_unavailable' }, { status: 503 });
-    }
-    return Response.json({
-      deletionsCompleted,
-      deletionsFailed,
-      purgeClaimed: purge.claimed,
-      purgeCompleted: purge.completed,
-      purgeFailed: purge.failed,
-      auditEventsPurged: Number(auditPurged ?? 0),
-    }, { headers: { 'Cache-Control': 'no-store' } });
-  } finally {
-    await admin.dispose();
+  const { data: requestIds, error: claimError } = await admin.rpc(
+    'claim_due_account_deletion_ids',
+    { p_limit: 20 },
+  );
+  if (claimError) {
+    return Response.json({ code: 'maintenance_unavailable' }, { status: 503 });
   }
+
+  let deletionsCompleted = 0;
+  let deletionsFailed = 0;
+  for (const requestId of (requestIds ?? []) as string[]) {
+    const result = await processAccountDeletion(admin, requestId);
+    if (result === 'completed') deletionsCompleted++;
+    else if (result === 'failed') deletionsFailed++;
+  }
+
+  const purge = await processLifecyclePurgeBatch(admin);
+  const { data: auditPurged, error: auditError } = await admin.rpc(
+    'purge_expired_financial_audit',
+  );
+  if (auditError) {
+    return Response.json({ code: 'maintenance_unavailable' }, { status: 503 });
+  }
+  return Response.json({
+    deletionsCompleted,
+    deletionsFailed,
+    purgeClaimed: purge.claimed,
+    purgeCompleted: purge.completed,
+    purgeFailed: purge.failed,
+    auditEventsPurged: Number(auditPurged ?? 0),
+  }, { headers: { 'Cache-Control': 'no-store' } });
 });

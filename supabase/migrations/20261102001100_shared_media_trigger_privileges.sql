@@ -150,22 +150,9 @@ REVOKE ALL ON FUNCTION app_private.guard_expense_receipt() FROM PUBLIC, anon, au
 REVOKE ALL ON FUNCTION app_private.guard_memory_row() FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.guard_memory_attachment() FROM PUBLIC, anon, authenticated, service_role;
 
--- RLS already verifies that the actor is a verified, active pair member;
--- the attachment trigger stamps the authoritative uploader identity.
-DROP POLICY couple_receipts_storage_insert ON storage.objects;
-CREATE POLICY couple_receipts_storage_insert ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'couple-receipts' AND EXISTS (
-  SELECT 1 FROM public.expense_receipts r
-  WHERE r.object_path = name AND r.created_by = (SELECT auth.uid())
-    AND app_private.can_read_shared_records(r.couple_id)
-));
-DROP POLICY couple_memories_storage_insert ON storage.objects;
-CREATE POLICY couple_memories_storage_insert ON storage.objects FOR INSERT TO authenticated
-WITH CHECK (bucket_id = 'couple-memories' AND EXISTS (
-  SELECT 1 FROM public.memory_attachments a
-  WHERE a.object_path = name AND a.created_by = (SELECT auth.uid())
-    AND app_private.can_read_shared_records(a.couple_id)
-));
+-- Attachment triggers remain for schema integrity and lifecycle maintenance.
+-- No Storage policies or client attachment grants are configured in Private
+-- Beta V1.
 
 COMMIT;
 NOTIFY pgrst, 'reload schema';

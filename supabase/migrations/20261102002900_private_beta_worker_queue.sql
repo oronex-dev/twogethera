@@ -10,7 +10,7 @@ SET LOCAL ROLE twogethera_membership_owner;
 CREATE FUNCTION public.claim_due_account_deletion_ids(p_limit integer DEFAULT 20)
 RETURNS SETOF uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN
     RAISE EXCEPTION 'service worker required' USING ERRCODE='42501';
   END IF;
   IF p_limit<1 OR p_limit>100 THEN RAISE EXCEPTION 'invalid batch size' USING ERRCODE='22023'; END IF;

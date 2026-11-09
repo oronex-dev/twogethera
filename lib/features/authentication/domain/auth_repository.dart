@@ -13,6 +13,7 @@ enum AuthProblem {
   emailAlreadyRegistered,
   registrationRejected,
   reauthenticationRequired,
+  reauthenticationFailed,
   lifecycleUnavailable,
 }
 
@@ -49,7 +50,9 @@ class AuthFailure implements Exception {
     AuthProblem.emailAlreadyRegistered => 'An account already exists for this address. Sign in, or use Confirm your email if it is still unconfirmed.',
     AuthProblem.registrationRejected => 'We could not create the account. Check the details and try again, or sign in if you already registered.',
     AuthProblem.reauthenticationRequired =>
-      'For security, sign in again and retry this account deletion request.',
+      'Verify your password again to continue this sensitive action.',
+    AuthProblem.reauthenticationFailed =>
+      'Password verification failed. Check your password and try again.',
     AuthProblem.lifecycleUnavailable => 'The account action could not be completed. Your shared space may already be closed; sign in and check its status before retrying.',
   };
   @override
@@ -127,4 +130,10 @@ abstract interface class PrivacyRemovalRepository {
     String? field,
     bool removeRecord = true,
   });
+}
+
+/// A fresh password grant is required before privacy removal or account
+/// deletion. Implementations must bind it to the currently authenticated user.
+abstract interface class RecentReauthenticationRepository {
+  Future<void> reauthenticateWithPassword(String password);
 }

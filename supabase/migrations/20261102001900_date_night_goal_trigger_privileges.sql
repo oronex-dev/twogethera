@@ -63,10 +63,10 @@ $function$;
 ALTER FUNCTION app_private.guard_date_night_vote() OWNER TO twogethera_membership_owner;
 REVOKE ALL ON FUNCTION app_private.guard_date_night_vote() FROM PUBLIC, anon, authenticated, service_role;
 
-DROP POLICY date_night_vote_pair_access ON public.date_night_votes;
+DROP POLICY IF EXISTS date_night_vote_pair_access ON public.date_night_votes;
 CREATE POLICY date_night_vote_pair_access ON public.date_night_votes FOR ALL TO authenticated
-  USING (app_private.can_read_shared_records(couple_id) AND user_id = auth.uid())
-  WITH CHECK (app_private.can_read_shared_records(couple_id) AND user_id = auth.uid());
+  USING (app_private.can_read_shared_records(couple_id) AND user_id = (COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.sub', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'))::uuid))
+  WITH CHECK (app_private.can_read_shared_records(couple_id) AND user_id = (COALESCE(NULLIF(pg_catalog.current_setting('request.jwt.claim.sub', true), ''), (NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'))::uuid));
 
 RESET ROLE;
 REVOKE CREATE ON SCHEMA app_private FROM twogethera_membership_owner;

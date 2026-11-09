@@ -11,6 +11,22 @@ SET LOCAL ROLE twogethera_membership_owner;
 ALTER DEFAULT PRIVILEGES IN SCHEMA app_private REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
+-- Read only the claims PostgREST installed after verifying the request JWT.
+-- The restricted owner does not need access to the managed auth schema.
+CREATE FUNCTION app_private.current_request_role()
+RETURNS text LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $function$
+  SELECT NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'
+$function$;
+REVOKE ALL ON FUNCTION app_private.current_request_role()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE FUNCTION app_private.current_request_auth_time()
+RETURNS text LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $function$
+  SELECT NULLIF(pg_catalog.current_setting('request.jwt.claims', true), '')::jsonb ->> 'auth_time'
+$function$;
+REVOKE ALL ON FUNCTION app_private.current_request_auth_time()
+  FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE TABLE app_private.private_beta_allowlist (
   slot smallint PRIMARY KEY CHECK (slot IN (1,2)),
   user_id uuid NOT NULL UNIQUE,
@@ -22,7 +38,6 @@ CREATE TABLE app_private.account_deletion_requests (
   user_id uuid UNIQUE,
   operation_id uuid NOT NULL,
   state text NOT NULL CHECK (state IN ('pending','processing','failed','complete')),
-  avatar_object_path text,
   lease_until timestamptz,
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   failure_code text CHECK (failure_code IS NULL OR failure_code IN ('auth_admin_unavailable','auth_delete_rejected','unknown')),
@@ -51,7 +66,7 @@ CREATE TABLE app_private.lifecycle_purge_jobs (
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   available_at timestamptz NOT NULL DEFAULT statement_timestamp(),
   lease_until timestamptz,
-  last_error_code text CHECK (last_error_code IS NULL OR last_error_code IN ('storage_delete_failed','row_delete_restricted','temporary_unavailable','unknown')),
+  last_error_code text CHECK (last_error_code IS NULL OR last_error_code IN ('row_delete_restricted','temporary_unavailable','unknown')),
   created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
   CHECK ((job_kind IN ('privacy_record','ordinary_record')) = (target_table IS NOT NULL AND target_id IS NOT NULL)),
   CHECK ((job_kind = 'closed_couple') = (target_table IS NULL AND target_id IS NULL))
@@ -67,12 +82,6 @@ CREATE UNIQUE INDEX lifecycle_purge_closed_couple_once
   WHERE job_kind = 'closed_couple';
 CREATE INDEX lifecycle_purge_jobs_due ON app_private.lifecycle_purge_jobs(available_at, due_at)
   WHERE state IN ('pending','retry');
-CREATE TABLE app_private.lifecycle_purge_storage_objects (
-  job_id uuid NOT NULL REFERENCES app_private.lifecycle_purge_jobs(id) ON DELETE CASCADE,
-  bucket_id text NOT NULL CHECK (bucket_id IN ('couple-memories','couple-receipts','profile-photos')),
-  object_path text NOT NULL,
-  PRIMARY KEY (job_id,bucket_id,object_path)
-);
 CREATE TABLE app_private.ordinary_deleted_records (
   couple_id uuid NOT NULL,
   target_table text NOT NULL,
@@ -168,7 +177,7 @@ GRANT SELECT ON app_private.private_beta_allowlist,
   app_private.account_deletion_requests TO postgres;
 GRANT SELECT, INSERT, UPDATE, DELETE ON app_private.private_beta_allowlist,
   app_private.account_deletion_requests, app_private.couple_closure_receipts,
-  app_private.lifecycle_purge_jobs, app_private.lifecycle_purge_storage_objects, app_private.ordinary_deleted_records, app_private.privacy_removal_requests,
+  app_private.lifecycle_purge_jobs, app_private.ordinary_deleted_records, app_private.privacy_removal_requests,
   app_private.privacy_content_blocks, app_private.financial_audit_scopes,
   app_private.financial_audit_actor_aliases, app_private.financial_audit_heads,
   app_private.financial_audit_retention, app_private.financial_audit_events
@@ -251,7 +260,7 @@ DECLARE
   v_couple_id uuid;
   v_state text;
 BEGIN
-  IF auth.role() = 'service_role' THEN
+  IF app_private.current_request_role() = 'service_role' THEN
     IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
   END IF;
   v_couple_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.couple_id ELSE NEW.couple_id END;
@@ -299,7 +308,7 @@ DECLARE
   v_exponent smallint;
   v_effective_date date;
 BEGIN
-  IF auth.role() = 'service_role' THEN
+  IF app_private.current_request_role() = 'service_role' THEN
     IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
   END IF;
   v_couple_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.couple_id ELSE NEW.couple_id END;
@@ -360,7 +369,7 @@ CREATE TRIGGER z_financial_audit_capture
 CREATE FUNCTION app_private.guard_financial_audit_append_only()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 BEGIN
-  IF TG_OP='DELETE' AND auth.role()='service_role'
+  IF TG_OP='DELETE' AND app_private.current_request_role()='service_role'
      AND current_setting('app_private.audit_expiry_purge',true)='on' THEN
     RETURN OLD;
   END IF;
@@ -388,10 +397,9 @@ GRANT EXECUTE ON FUNCTION app_private.content_is_unblocked(text,uuid) TO authent
 
 CREATE FUNCTION app_private.soft_delete_shared_text()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
-DECLARE v_job_id uuid;
 BEGIN
-  IF auth.role()='service_role' THEN RETURN OLD; END IF;
-  IF auth.role() IS DISTINCT FROM 'authenticated'
+  IF app_private.current_request_role()='service_role' THEN RETURN OLD; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'authenticated'
      OR app_private.current_identity_is_verified(false) IS NULL
      OR NOT app_private.can_read_shared_records(OLD.couple_id) THEN
     RAISE EXCEPTION 'active paired couple required' USING ERRCODE='42501';
@@ -402,18 +410,7 @@ BEGIN
   IF NOT FOUND THEN RETURN NULL; END IF;
   INSERT INTO app_private.lifecycle_purge_jobs(job_kind,couple_id,target_table,target_id,due_at)
     VALUES('ordinary_record',OLD.couple_id,TG_TABLE_NAME,OLD.id,statement_timestamp()+interval '7 days')
-    ON CONFLICT DO NOTHING RETURNING id INTO v_job_id;
-  IF v_job_id IS NULL THEN
-    SELECT id INTO v_job_id FROM app_private.lifecycle_purge_jobs
-      WHERE job_kind='ordinary_record' AND couple_id=OLD.couple_id
-        AND target_table=TG_TABLE_NAME AND target_id=OLD.id
-        AND state IN ('pending','processing','retry');
-  END IF;
-  IF TG_TABLE_NAME='couple_memories' AND v_job_id IS NOT NULL THEN
-    INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-      SELECT v_job_id,'couple-memories',a.object_path FROM public.memory_attachments a
-       WHERE a.couple_id=OLD.couple_id AND a.memory_id=OLD.id ON CONFLICT DO NOTHING;
-  END IF;
+    ON CONFLICT DO NOTHING;
   IF TG_TABLE_NAME='plans' THEN
     INSERT INTO app_private.ordinary_deleted_records(couple_id,target_table,target_id,parent_table,parent_id,restore_until)
       SELECT couple_id,'plan_tasks',id,'plans',OLD.id,statement_timestamp()+interval '7 days'
@@ -487,7 +484,7 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $funct
 DECLARE v_space public.couple_spaces%ROWTYPE;
 BEGIN
   IF TG_OP='DELETE' THEN
-    IF auth.role()='service_role' AND current_setting('app_private.lifecycle_membership_purge',true)='on' THEN
+    IF app_private.current_request_role()='service_role' AND current_setting('app_private.lifecycle_membership_purge',true)='on' THEN
       SELECT * INTO v_space FROM public.couple_spaces WHERE id=OLD.couple_id;
       IF FOUND AND v_space.state='archived' AND v_space.closed_at<=statement_timestamp()-interval '30 days'
         THEN RETURN OLD; END IF;
@@ -521,7 +518,7 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $funct
 DECLARE v_closed_at timestamptz; v_state text;
 BEGIN
   IF TG_OP='DELETE' THEN
-    IF auth.role()='service_role' AND current_setting('app_private.lifecycle_membership_purge',true)='on' THEN
+    IF app_private.current_request_role()='service_role' AND current_setting('app_private.lifecycle_membership_purge',true)='on' THEN
       SELECT state,closed_at INTO v_state,v_closed_at FROM public.couple_spaces WHERE id=OLD.couple_id;
       IF v_state='archived' AND v_closed_at<=statement_timestamp()-interval '30 days' THEN RETURN OLD; END IF;
     END IF;
@@ -545,16 +542,20 @@ CREATE OR REPLACE FUNCTION app_private.guard_financial_row()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 DECLARE v_actor uuid; v_budget public.couple_budgets%ROWTYPE; v_seat1 uuid; v_seat2 uuid;
 BEGIN
-  IF TG_OP='UPDATE' AND TG_TABLE_NAME='couple_expenses' AND auth.role()='service_role'
-     AND current_setting('app_private.lifecycle_membership_purge',true)='on'
-     AND OLD.recurring_rule_id IS NOT NULL AND NEW.recurring_rule_id IS NULL AND NEW.recurrence_key IS NULL THEN
-    IF (to_jsonb(OLD)-ARRAY['recurring_rule_id','recurrence_key','revision','updated_at','updated_by'])
-       IS DISTINCT FROM
-       (to_jsonb(NEW)-ARRAY['recurring_rule_id','recurrence_key','revision','updated_at','updated_by']) THEN
-      RAISE EXCEPTION 'invalid lifecycle relationship cleanup' USING ERRCODE='42501';
+  IF TG_OP='UPDATE' AND TG_TABLE_NAME='couple_expenses' THEN
+    IF app_private.current_request_role()='service_role'
+       AND current_setting('app_private.lifecycle_membership_purge',true)='on'
+       AND OLD.recurring_rule_id IS NOT NULL
+       AND NEW.recurring_rule_id IS NULL
+       AND NEW.recurrence_key IS NULL THEN
+      IF (to_jsonb(OLD)-ARRAY['recurring_rule_id','recurrence_key','revision','updated_at','updated_by'])
+         IS DISTINCT FROM
+         (to_jsonb(NEW)-ARRAY['recurring_rule_id','recurrence_key','revision','updated_at','updated_by']) THEN
+        RAISE EXCEPTION 'invalid lifecycle relationship cleanup' USING ERRCODE='42501';
+      END IF;
+      NEW.updated_at:=statement_timestamp(); NEW.revision:=OLD.revision+1; NEW.updated_by:=OLD.updated_by;
+      RETURN NEW;
     END IF;
-    NEW.updated_at:=statement_timestamp(); NEW.revision:=OLD.revision+1; NEW.updated_by:=OLD.updated_by;
-    RETURN NEW;
   END IF;
   v_actor:=app_private.current_identity_is_verified(false);
   IF TG_OP='INSERT' THEN
@@ -721,47 +722,13 @@ BEGIN
 END
 $function$;
 ALTER FUNCTION public.delete_couple_memory(uuid,uuid,bigint) OWNER TO twogethera_membership_owner;
-REVOKE ALL ON FUNCTION public.delete_couple_memory(uuid,uuid,bigint) FROM PUBLIC,anon,service_role;
-GRANT EXECUTE ON FUNCTION public.delete_couple_memory(uuid,uuid,bigint) TO authenticated;
+REVOKE ALL ON FUNCTION public.delete_couple_memory(uuid,uuid,bigint) FROM PUBLIC,anon,authenticated,service_role;
 
--- Immediately make attached objects inaccessible when an attachment or its
--- parent memory/expense is privacy-blocked. This also covers Storage API paths.
-CREATE POLICY private_beta_storage_lifecycle_guard ON storage.objects AS RESTRICTIVE FOR ALL TO authenticated
-USING (
-  bucket_id NOT IN ('couple-memories','couple-receipts') OR
-  (bucket_id='couple-memories' AND EXISTS (
-    SELECT 1 FROM public.memory_attachments a
-    WHERE a.object_path=name AND app_private.content_is_unblocked('memory_attachments',a.id)
-      AND app_private.content_is_unblocked('couple_memories',a.memory_id)
-      AND app_private.can_read_shared_records(a.couple_id)
-  )) OR
-  (bucket_id='couple-receipts' AND EXISTS (
-    SELECT 1 FROM public.expense_receipts r
-    JOIN public.couple_expenses e ON e.couple_id=r.couple_id AND e.id=r.expense_id
-    WHERE r.object_path=name AND app_private.content_is_unblocked('expense_receipts',r.id)
-      AND app_private.content_is_unblocked('couple_expenses',e.id)
-      AND app_private.can_read_shared_records(r.couple_id)
-  ))
-)
-WITH CHECK (
-  bucket_id NOT IN ('couple-memories','couple-receipts') OR
-  (bucket_id='couple-memories' AND EXISTS (
-    SELECT 1 FROM public.memory_attachments a
-    WHERE a.object_path=name AND app_private.content_is_unblocked('memory_attachments',a.id)
-      AND app_private.content_is_unblocked('couple_memories',a.memory_id)
-      AND app_private.can_read_shared_records(a.couple_id)
-  )) OR
-  (bucket_id='couple-receipts' AND EXISTS (
-    SELECT 1 FROM public.expense_receipts r
-    JOIN public.couple_expenses e ON e.couple_id=r.couple_id AND e.id=r.expense_id
-    WHERE r.object_path=name AND app_private.content_is_unblocked('expense_receipts',r.id)
-      AND app_private.content_is_unblocked('couple_expenses',e.id)
-      AND app_private.can_read_shared_records(r.couple_id)
-  ))
-);
-CREATE POLICY private_beta_profile_photo_disabled ON storage.objects AS RESTRICTIVE FOR ALL TO authenticated
-  USING (bucket_id<>'profile-photos')
-  WITH CHECK (bucket_id<>'profile-photos');
+-- No Storage buckets or object policies are provisioned in Private Beta V1.
+-- Attachment metadata has no authenticated INSERT grant, and avatar_path is
+-- constrained to NULL. Therefore lifecycle manifests are empty; the worker
+-- completes purge jobs without invoking Storage. A hosted preflight must
+-- verify there are no existing Storage buckets or objects before deployment.
 
 CREATE FUNCTION public.close_my_couple_space(p_operation_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
@@ -770,7 +737,6 @@ DECLARE
   v_couple uuid;
   v_state text;
   v_closed_at timestamptz;
-  v_job_id uuid;
 BEGIN
   IF p_operation_id IS NULL THEN RAISE EXCEPTION 'invalid operation' USING ERRCODE = '22023'; END IF;
   v_actor := app_private.current_identity_is_verified(true);
@@ -807,16 +773,6 @@ BEGIN
     VALUES(v_actor,p_operation_id,v_couple,v_closed_at);
   INSERT INTO app_private.lifecycle_purge_jobs(job_kind,couple_id,due_at)
     VALUES('closed_couple',v_couple,v_closed_at+interval '30 days')
-    ON CONFLICT DO NOTHING RETURNING id INTO v_job_id;
-  IF v_job_id IS NULL THEN
-    SELECT id INTO v_job_id FROM app_private.lifecycle_purge_jobs
-      WHERE job_kind='closed_couple' AND couple_id=v_couple;
-  END IF;
-  INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-    SELECT v_job_id,'couple-memories',a.object_path FROM public.memory_attachments a WHERE a.couple_id=v_couple
-    ON CONFLICT DO NOTHING;
-  INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-    SELECT v_job_id,'couple-receipts',r.object_path FROM public.expense_receipts r WHERE r.couple_id=v_couple
     ON CONFLICT DO NOTHING;
   INSERT INTO app_private.financial_audit_retention(opaque_couple_ref,closed_at,expires_at)
     SELECT opaque_couple_ref,v_closed_at,v_closed_at+interval '90 days'
@@ -834,9 +790,8 @@ CREATE FUNCTION public.request_my_account_deletion(p_operation_id uuid)
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 DECLARE
   v_actor uuid;
-  v_auth_time text := auth.jwt()->>'auth_time';
+  v_auth_time text := app_private.current_request_auth_time();
   v_request_id uuid;
-  v_avatar_path text;
 BEGIN
   v_actor := app_private.current_identity_for_deletion(true);
   IF v_actor IS NULL THEN RAISE EXCEPTION 'private beta access required' USING ERRCODE = '42501'; END IF;
@@ -851,12 +806,11 @@ BEGIN
   IF EXISTS (SELECT 1 FROM app_private.account_deletion_requests WHERE user_id=v_actor) THEN
     RAISE EXCEPTION 'account deletion already pending' USING ERRCODE='42501';
   END IF;
-  SELECT avatar_path INTO v_avatar_path FROM public.user_profiles WHERE user_id=v_actor;
   PERFORM public.close_my_couple_space(p_operation_id);
   UPDATE public.user_profiles SET avatar_path=NULL WHERE user_id=v_actor;
   v_request_id := gen_random_uuid();
-  INSERT INTO app_private.account_deletion_requests(request_id,user_id,operation_id,state,avatar_object_path)
-    VALUES(v_request_id,v_actor,p_operation_id,'pending',v_avatar_path);
+  INSERT INTO app_private.account_deletion_requests(request_id,user_id,operation_id,state)
+    VALUES(v_request_id,v_actor,p_operation_id,'pending');
   RETURN v_request_id;
 END
 $function$;
@@ -865,15 +819,15 @@ REVOKE ALL ON FUNCTION public.request_my_account_deletion(uuid) FROM PUBLIC, ano
 GRANT EXECUTE ON FUNCTION public.request_my_account_deletion(uuid) TO authenticated;
 
 CREATE FUNCTION public.claim_account_deletion(p_request_id uuid)
-RETURNS TABLE(request_id uuid,user_id uuid,avatar_object_path text)
+RETURNS TABLE(request_id uuid,user_id uuid)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
   RETURN QUERY UPDATE app_private.account_deletion_requests r
     SET state='processing',failure_code=NULL,lease_until=statement_timestamp()+interval '5 minutes',attempts=r.attempts+1
     WHERE r.request_id=p_request_id AND (r.state IN ('pending','failed') OR
       (r.state='processing' AND r.lease_until<statement_timestamp()))
-    RETURNING r.request_id,r.user_id,r.avatar_object_path;
+    RETURNING r.request_id,r.user_id;
 END
 $function$;
 ALTER FUNCTION public.claim_account_deletion(uuid) OWNER TO twogethera_membership_owner;
@@ -883,7 +837,7 @@ GRANT EXECUTE ON FUNCTION public.claim_account_deletion(uuid) TO service_role;
 CREATE FUNCTION public.mark_account_deletion_failed(p_request_id uuid,p_failure_code text)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
   IF p_failure_code NOT IN ('auth_admin_unavailable','auth_delete_rejected','unknown') THEN
     RAISE EXCEPTION 'invalid failure code' USING ERRCODE='22023';
   END IF;
@@ -900,12 +854,13 @@ CREATE FUNCTION public.mark_account_deletion_complete(p_request_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 DECLARE v_user_id uuid;
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
   SELECT user_id INTO v_user_id FROM app_private.account_deletion_requests
     WHERE request_id=p_request_id AND state='processing' FOR UPDATE;
   IF v_user_id IS NULL THEN RETURN false; END IF;
+  DELETE FROM public.user_profiles WHERE user_id=v_user_id;
   DELETE FROM app_private.private_beta_allowlist WHERE user_id=v_user_id;
-  UPDATE app_private.account_deletion_requests SET state='complete',completed_at=statement_timestamp(),user_id=NULL,avatar_object_path=NULL,failure_code=NULL
+  UPDATE app_private.account_deletion_requests SET state='complete',completed_at=statement_timestamp(),user_id=NULL,failure_code=NULL
     WHERE request_id=p_request_id AND state='processing';
   RETURN FOUND;
 END
@@ -922,8 +877,7 @@ DECLARE
   v_couple uuid;
   v_request uuid;
   v_allowed boolean := false;
-  v_job_id uuid;
-  v_auth_time text := auth.jwt()->>'auth_time';
+  v_auth_time text := app_private.current_request_auth_time();
 BEGIN
   v_actor := app_private.current_identity_is_verified(true);
   IF v_actor IS NULL THEN RAISE EXCEPTION 'private beta access required' USING ERRCODE='42501'; END IF;
@@ -974,29 +928,7 @@ BEGIN
       ON CONFLICT(target_table,target_id) DO NOTHING;
     INSERT INTO app_private.lifecycle_purge_jobs(job_kind,couple_id,target_table,target_id,due_at)
       VALUES('privacy_record',v_couple,p_table,p_record_id,statement_timestamp())
-      ON CONFLICT DO NOTHING RETURNING id INTO v_job_id;
-    IF v_job_id IS NULL THEN
-      SELECT id INTO v_job_id FROM app_private.lifecycle_purge_jobs
-        WHERE job_kind='privacy_record' AND couple_id=v_couple
-          AND target_table=p_table AND target_id=p_record_id;
-    END IF;
-    IF p_table='memory_attachments' THEN
-      INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-        SELECT v_job_id,'couple-memories',object_path FROM public.memory_attachments WHERE id=p_record_id AND couple_id=v_couple
-        ON CONFLICT DO NOTHING;
-    ELSIF p_table='expense_receipts' THEN
-      INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-        SELECT v_job_id,'couple-receipts',object_path FROM public.expense_receipts WHERE id=p_record_id AND couple_id=v_couple
-        ON CONFLICT DO NOTHING;
-    ELSIF p_table='couple_memories' THEN
-      INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-        SELECT v_job_id,'couple-memories',a.object_path FROM public.memory_attachments a WHERE a.memory_id=p_record_id AND a.couple_id=v_couple
-        ON CONFLICT DO NOTHING;
-    ELSIF p_table='couple_expenses' THEN
-      INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-        SELECT v_job_id,'couple-receipts',r.object_path FROM public.expense_receipts r WHERE r.expense_id=p_record_id AND r.couple_id=v_couple
-        ON CONFLICT DO NOTHING;
-    END IF;
+      ON CONFLICT DO NOTHING;
     INSERT INTO app_private.privacy_removal_requests(request_id,operation_id,requester_user_id,couple_id,target_table,target_id,target_field,removes_record,state)
       VALUES(v_request,p_operation_id,v_actor,v_couple,p_table,p_record_id,NULL,true,'blocked');
   ELSE
@@ -1013,11 +945,11 @@ REVOKE ALL ON FUNCTION public.record_my_privacy_removal(uuid,text,uuid,text,bool
 GRANT EXECUTE ON FUNCTION public.record_my_privacy_removal(uuid,text,uuid,text,boolean) TO authenticated;
 
 CREATE FUNCTION public.claim_lifecycle_purge_jobs(p_limit integer DEFAULT 20)
-RETURNS TABLE(job_id uuid,job_kind text,couple_id uuid,target_table text,target_id uuid,object_manifest jsonb)
+RETURNS TABLE(job_id uuid,job_kind text,couple_id uuid,target_table text,target_id uuid)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 DECLARE v_job record;
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
   IF p_limit < 1 OR p_limit > 100 THEN RAISE EXCEPTION 'invalid batch size' USING ERRCODE='22023'; END IF;
   FOR v_job IN
     SELECT j.* FROM app_private.lifecycle_purge_jobs j
@@ -1030,8 +962,6 @@ BEGIN
       WHERE id=v_job.id;
     job_id:=v_job.id; job_kind:=v_job.job_kind; couple_id:=v_job.couple_id;
     target_table:=v_job.target_table; target_id:=v_job.target_id;
-    SELECT coalesce(jsonb_agg(jsonb_build_object('bucket_id',o.bucket_id,'object_path',o.object_path)), '[]'::jsonb)
-      INTO object_manifest FROM app_private.lifecycle_purge_storage_objects o WHERE o.job_id=v_job.id;
     RETURN NEXT;
   END LOOP;
 END
@@ -1040,20 +970,13 @@ ALTER FUNCTION public.claim_lifecycle_purge_jobs(integer) OWNER TO twogethera_me
 REVOKE ALL ON FUNCTION public.claim_lifecycle_purge_jobs(integer) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.claim_lifecycle_purge_jobs(integer) TO service_role;
 
-CREATE FUNCTION public.finish_lifecycle_purge_job(p_job_id uuid,p_storage_removed boolean,p_error_code text DEFAULT NULL)
+CREATE FUNCTION public.finish_lifecycle_purge_job(p_job_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 DECLARE v_job app_private.lifecycle_purge_jobs%ROWTYPE;
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
   SELECT * INTO v_job FROM app_private.lifecycle_purge_jobs WHERE id=p_job_id AND state='processing' FOR UPDATE;
   IF NOT FOUND THEN RETURN false; END IF;
-  IF NOT p_storage_removed THEN
-    UPDATE app_private.lifecycle_purge_jobs SET state='retry',lease_until=NULL,
-      available_at=statement_timestamp()+least(interval '1 day',interval '1 minute' * power(2,least(attempts,10))),
-      last_error_code=coalesce(p_error_code,'storage_delete_failed')
-      WHERE id=p_job_id;
-    RETURN false;
-  END IF;
   IF v_job.job_kind IN ('privacy_record','ordinary_record') THEN
     IF v_job.target_table='memory_attachments' THEN DELETE FROM public.memory_attachments WHERE id=v_job.target_id AND couple_id=v_job.couple_id;
     ELSIF v_job.target_table='expense_receipts' THEN DELETE FROM public.expense_receipts WHERE id=v_job.target_id AND couple_id=v_job.couple_id;
@@ -1107,7 +1030,6 @@ BEGIN
     PERFORM set_config('app_private.lifecycle_membership_purge','off',true);
   END IF;
   UPDATE app_private.lifecycle_purge_jobs SET state='complete',lease_until=NULL,last_error_code=NULL WHERE id=p_job_id;
-  DELETE FROM app_private.lifecycle_purge_storage_objects WHERE job_id=p_job_id;
   IF v_job.job_kind='ordinary_record' THEN
     DELETE FROM app_private.ordinary_deleted_records WHERE target_table=v_job.target_table AND target_id=v_job.target_id;
     IF v_job.target_table IN ('plans','shared_goals') THEN
@@ -1128,15 +1050,15 @@ EXCEPTION WHEN foreign_key_violation OR check_violation THEN
   RETURN false;
 END
 $function$;
-ALTER FUNCTION public.finish_lifecycle_purge_job(uuid,boolean,text) OWNER TO twogethera_membership_owner;
-REVOKE ALL ON FUNCTION public.finish_lifecycle_purge_job(uuid,boolean,text) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.finish_lifecycle_purge_job(uuid,boolean,text) TO service_role;
+ALTER FUNCTION public.finish_lifecycle_purge_job(uuid) OWNER TO twogethera_membership_owner;
+REVOKE ALL ON FUNCTION public.finish_lifecycle_purge_job(uuid) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.finish_lifecycle_purge_job(uuid) TO service_role;
 
 CREATE FUNCTION public.purge_expired_financial_audit()
 RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $function$
 DECLARE v_count bigint;
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
+  IF app_private.current_request_role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service worker required' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app_private.audit_expiry_purge','on',true);
   DELETE FROM app_private.financial_audit_events e USING app_private.financial_audit_retention r
    WHERE e.opaque_couple_ref=r.opaque_couple_ref AND r.expires_at<=statement_timestamp();

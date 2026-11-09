@@ -13,7 +13,6 @@ DECLARE
   v_couple uuid;
   v_state text;
   v_closed_at timestamptz;
-  v_job_id uuid;
 BEGIN
   IF p_operation_id IS NULL THEN RAISE EXCEPTION 'invalid operation' USING ERRCODE='22023'; END IF;
   v_actor:=app_private.current_identity_is_verified(true);
@@ -54,18 +53,7 @@ BEGIN
   INSERT INTO app_private.couple_closure_receipts(actor_user_id,operation_id,couple_id,closed_at)
    VALUES(v_actor,p_operation_id,v_couple,v_closed_at);
   INSERT INTO app_private.lifecycle_purge_jobs(job_kind,couple_id,due_at)
-   VALUES('closed_couple',v_couple,v_closed_at+interval '30 days') ON CONFLICT DO NOTHING
-   RETURNING id INTO v_job_id;
-  IF v_job_id IS NULL THEN
-    SELECT id INTO v_job_id FROM app_private.lifecycle_purge_jobs
-     WHERE job_kind='closed_couple' AND couple_id=v_couple;
-  END IF;
-  INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-   SELECT v_job_id,'couple-memories',a.object_path FROM public.memory_attachments a
-    WHERE a.couple_id=v_couple ON CONFLICT DO NOTHING;
-  INSERT INTO app_private.lifecycle_purge_storage_objects(job_id,bucket_id,object_path)
-   SELECT v_job_id,'couple-receipts',r.object_path FROM public.expense_receipts r
-    WHERE r.couple_id=v_couple ON CONFLICT DO NOTHING;
+   VALUES('closed_couple',v_couple,v_closed_at+interval '30 days') ON CONFLICT DO NOTHING;
   INSERT INTO app_private.financial_audit_retention(opaque_couple_ref,closed_at,expires_at)
    SELECT opaque_couple_ref,v_closed_at,v_closed_at+interval '90 days'
     FROM app_private.financial_audit_scopes WHERE couple_id=v_couple

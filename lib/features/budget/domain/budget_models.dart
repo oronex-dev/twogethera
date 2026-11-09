@@ -191,7 +191,6 @@ class CoupleExpense {
     required this.splitBUserId,
     required this.splitBMinor,
     required this.revision,
-    required this.receiptCount,
     this.recurringRuleId,
   });
   final String id;
@@ -210,7 +209,6 @@ class CoupleExpense {
   final String splitBUserId;
   final int splitBMinor;
   final int revision;
-  final int receiptCount;
   final String? recurringRuleId;
 
   factory CoupleExpense.fromJson(Map<String, dynamic> json) {
@@ -236,7 +234,6 @@ class CoupleExpense {
       splitBUserId: json['split_b_user_id'] as String,
       splitBMinor: (json['split_b_minor'] as num).toInt(),
       revision: (json['revision'] as num).toInt(),
-      receiptCount: (json['receipt_count'] as num?)?.toInt() ?? 0,
       recurringRuleId: json['recurring_rule_id'] as String?,
     );
   }
@@ -477,33 +474,6 @@ class RecurringExpenseOccurrence {
   final DateTime date;
 }
 
-@immutable
-class ExpenseReceipt {
-  const ExpenseReceipt({
-    required this.id,
-    required this.coupleId,
-    required this.expenseId,
-    required this.objectPath,
-    required this.contentType,
-    required this.byteSize,
-  });
-  final String id;
-  final String coupleId;
-  final String expenseId;
-  final String objectPath;
-  final String contentType;
-  final int byteSize;
-
-  factory ExpenseReceipt.fromJson(Map<String, dynamic> json) => ExpenseReceipt(
-    id: json['id'] as String,
-    coupleId: json['couple_id'] as String,
-    expenseId: json['expense_id'] as String,
-    objectPath: json['object_path'] as String,
-    contentType: json['content_type'] as String,
-    byteSize: (json['byte_size'] as num).toInt(),
-  );
-}
-
 abstract interface class BudgetRepository {
   Future<BudgetSnapshot> loadBudget(String coupleId, DateTime month);
   Future<void> saveBudget(
@@ -545,13 +515,4 @@ abstract interface class BudgetRepository {
     RecurringExpenseRule rule,
     DateTime occurrence,
   );
-  Future<List<ExpenseReceipt>> loadReceipts(String coupleId, String expenseId);
-  Future<void> uploadReceipt(
-    String coupleId,
-    String expenseId,
-    Uint8List bytes,
-    String contentType,
-  );
-  Future<Uint8List> downloadReceipt(String path);
-  Future<void> deleteReceipt(ExpenseReceipt receipt);
 }

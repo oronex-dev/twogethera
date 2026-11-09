@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
@@ -166,7 +165,6 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               onFilter: (value) => setState(() => _filter = value),
               onEdit: (expense) => _editExpense(snapshot, expense: expense),
               onDelete: (expense) => _deleteExpense(expense),
-              onReceipts: (expense) => _manageReceipts(expense),
             ),
           ],
         ],
@@ -273,9 +271,6 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
         );
   }
 
-  String get coupleIdOrEmpty =>
-      ref.read(budgetControllerProvider).coupleId ?? '';
-
   Future<void> _editRecurring(
     BudgetSnapshot snapshot, {
     RecurringExpenseRule? rule,
@@ -373,7 +368,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Delete this expense?'),
         content: const Text(
-          'Ordinary deletion reverses the current amount in the minimized audit. Privacy removal hides the expense and receipts immediately, cannot be undone, and queues primary-copy cleanup with a 24-hour target.',
+          'Ordinary deletion reverses the current amount in the minimized audit. Privacy removal hides the expense immediately, cannot be undone, and queues primary-copy cleanup with a 24-hour target.',
         ),
         actions: [
           TextButton(
@@ -436,167 +431,6 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
           _showMessage('The privacy request could not be submitted.');
         }
       }
-    }
-  }
-
-  Future<void> _manageReceipts(CoupleExpense expense) async {
-    final coupleId = coupleIdOrEmpty;
-    final repository = ref.read(budgetRepositoryProvider);
-    List<ExpenseReceipt> receipts;
-    try {
-      receipts = await repository.loadReceipts(coupleId, expense.id);
-    } catch (_) {
-      if (mounted) {
-        _showMessage(
-          'Private receipts could not be loaded. Retry when connected.',
-        );
-      }
-      return;
-    }
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Private receipts'),
-          content: SizedBox(
-            width: 480,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 440),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (receipts.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 18),
-                        child: Text('No receipts attached yet.'),
-                      )
-                    else
-                      ...receipts.map(
-                        (receipt) => ListTile(
-                          leading: const Icon(Icons.image_outlined),
-                          title: Text(
-                            '${(receipt.byteSize / 1024).ceil()} KB image',
-                          ),
-                          trailing: Wrap(
-                            children: [
-                              IconButton(
-                                tooltip: 'View private receipt',
-                                icon: const Icon(Icons.visibility_outlined),
-                                onPressed: () => _viewReceipt(receipt),
-                              ),
-                              IconButton(
-                                tooltip: 'Remove receipt',
-                                icon: const Icon(Icons.delete_outline_rounded),
-                                onPressed: () async {
-                                  try {
-                                    await repository.deleteReceipt(receipt);
-                                    final updated = await repository
-                                        .loadReceipts(coupleId, expense.id);
-                                    setDialogState(() => receipts = updated);
-                                    if (mounted) {
-                                      await ref
-                                          .read(
-                                            budgetControllerProvider.notifier,
-                                          )
-                                          .load(coupleId, _month);
-                                    }
-                                  } catch (_) {
-                                    if (mounted) {
-                                      _showMessage(
-                                        'Receipt removal failed. Retry when connected.',
-                                      );
-                                    }
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: receipts.length >= 5
-                          ? null
-                          : () async {
-                              final files = await ImagePicker().pickMultiImage(
-                                imageQuality: 90,
-                              );
-                              if (files.isEmpty) return;
-                              try {
-                                for (final file in files.take(
-                                  5 - receipts.length,
-                                )) {
-                                  final bytes = await file.readAsBytes();
-                                  await repository.uploadReceipt(
-                                    coupleId,
-                                    expense.id,
-                                    bytes,
-                                    file.mimeType ?? 'image/jpeg',
-                                  );
-                                }
-                                final updated = await repository.loadReceipts(
-                                  coupleId,
-                                  expense.id,
-                                );
-                                setDialogState(() => receipts = updated);
-                                if (mounted) {
-                                  await ref
-                                      .read(budgetControllerProvider.notifier)
-                                      .load(coupleId, _month);
-                                }
-                              } catch (_) {
-                                if (mounted) {
-                                  _showMessage(
-                                    'A private receipt could not be uploaded. Retry when connected.',
-                                  );
-                                }
-                              }
-                            },
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: Text(
-                        receipts.length >= 5
-                            ? 'Receipt limit reached'
-                            : 'Add receipt images',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _viewReceipt(ExpenseReceipt receipt) async {
-    try {
-      final bytes = await ref
-          .read(budgetRepositoryProvider)
-          .downloadReceipt(receipt.objectPath);
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => Dialog(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720, maxHeight: 720),
-              child: Image.memory(bytes, fit: BoxFit.contain),
-            ),
-          ),
-        ),
-      );
-    } catch (_) {
-      if (mounted) _showMessage('That private receipt could not be opened.');
     }
   }
 
@@ -964,7 +798,6 @@ class _ExpenseHistory extends StatelessWidget {
     required this.onFilter,
     required this.onEdit,
     required this.onDelete,
-    required this.onReceipts,
   });
   final BudgetSnapshot snapshot;
   final String query;
@@ -973,7 +806,6 @@ class _ExpenseHistory extends StatelessWidget {
   final ValueChanged<BudgetCategory?> onFilter;
   final ValueChanged<CoupleExpense> onEdit;
   final ValueChanged<CoupleExpense> onDelete;
-  final ValueChanged<CoupleExpense> onReceipts;
   @override
   Widget build(BuildContext context) {
     final members = {
@@ -1061,11 +893,6 @@ class _ExpenseHistory extends StatelessWidget {
                         expense.currency,
                       ).format(),
                       style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    IconButton(
-                      tooltip: 'Manage private receipts',
-                      onPressed: () => onReceipts(expense),
-                      icon: const Icon(Icons.receipt_long_outlined),
                     ),
                     IconButton(
                       tooltip: 'Edit expense',

@@ -13,7 +13,6 @@ import '../../features/partner_linking/presentation/partner_linking_screen.dart'
 import '../../features/shared_planner/presentation/shared_planner_screen.dart';
 import '../../features/shared_planner/presentation/global_search_screen.dart';
 import '../../features/budget/presentation/budget_screen.dart';
-import '../../features/memories/presentation/memories_screen.dart';
 import '../../features/date_nights/presentation/date_nights_screen.dart';
 import '../../features/goals/presentation/shared_goals_screen.dart';
 import '../../features/legal/presentation/legal_document_screen.dart';
@@ -28,7 +27,6 @@ String? _safeNextRoute(String? value) {
   if (uri.path == '/partner' ||
       uri.path == '/account' ||
       uri.path == '/budget' ||
-      uri.path == '/memories' ||
       uri.path == '/date-nights' ||
       uri.path == '/goals' ||
       uri.path == '/') {
@@ -81,6 +79,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refresh,
     redirect: (context, route) {
       if (route.uri.path == '/auth/callback') return null;
+      if (route.uri.path == '/memories') return '/';
       final phase = ref.read(authControllerProvider).phase;
       final authenticated = phase == AuthPhase.authenticated;
       if (phase == AuthPhase.recovering &&
@@ -95,8 +94,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       }
       if ((route.uri.path == '/planner' ||
               route.uri.path == '/search' ||
-              route.uri.path == '/budget' ||
-              route.uri.path == '/memories') &&
+              route.uri.path == '/budget') &&
           !authenticated) {
         return '/auth/local?next=${Uri.encodeComponent(route.uri.toString())}';
       }
@@ -188,10 +186,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/budget',
             builder: (context, state) => const BudgetScreen(),
-          ),
-          GoRoute(
-            path: '/memories',
-            builder: (context, state) => const MemoriesScreen(),
           ),
           GoRoute(
             path: '/date-nights',

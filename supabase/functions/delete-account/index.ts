@@ -96,7 +96,5 @@ Deno.serve(async (request) => {
     return json(503, { code: 'deletion_pending_retry' }, origin);
   } finally {
     await userClient.auth.signOut({ scope: 'local' }).catch(() => undefined);
-    await userClient.dispose();
-    await admin.dispose();
   }
 });

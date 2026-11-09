@@ -1,6 +1,5 @@
--- CP-013 follow-up: allow the SECURITY DEFINER owner to resolve the Auth
--- claim helpers used by lifecycle triggers and RPCs. This grants schema
--- USAGE only; it does not grant access to Auth tables or sequences.
+-- CP-013 follow-up: verify restricted functions use request claims without
+-- granting the application owner access to the managed Auth schema.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
@@ -50,31 +49,59 @@ BEGIN
     RAISE EXCEPTION 'Auth helper ownership differs from the expected Supabase owner';
   END IF;
 
+  IF NOT pg_catalog.has_schema_privilege('postgres', 'auth', 'USAGE') THEN
+    RAISE EXCEPTION 'postgres lacks required Auth schema USAGE';
+  END IF;
+
   IF EXISTS (
     SELECT 1
     FROM pg_catalog.pg_proc AS auth_helper
-    JOIN pg_catalog.pg_namespace AS ns
-      ON ns.oid = auth_helper.pronamespace
+    JOIN pg_catalog.pg_namespace AS ns ON ns.oid = auth_helper.pronamespace
     WHERE ns.nspname = 'auth'
       AND auth_helper.proname IN ('role', 'uid', 'jwt')
       AND auth_helper.pronargs = 0
-      AND NOT pg_catalog.has_function_privilege(
-        'twogethera_membership_owner', auth_helper.oid, 'EXECUTE'
-      )
+      AND NOT pg_catalog.has_function_privilege('postgres', auth_helper.oid, 'EXECUTE')
   ) THEN
-    RAISE EXCEPTION 'membership owner lacks EXECUTE on a required Auth helper';
+    RAISE EXCEPTION 'postgres lacks EXECUTE on a required Auth helper';
+  END IF;
+
+  IF (
+    SELECT count(*)
+    FROM pg_catalog.pg_proc AS claim_helper
+    JOIN pg_catalog.pg_namespace AS ns ON ns.oid = claim_helper.pronamespace
+    WHERE ns.nspname = 'app_private'
+      AND claim_helper.proname IN ('current_request_role', 'current_request_auth_time')
+      AND claim_helper.pronargs = 0
+      AND pg_catalog.pg_get_userbyid(claim_helper.proowner) = 'twogethera_membership_owner'
+      AND NOT claim_helper.prosecdef
+      AND claim_helper.proconfig @> ARRAY['search_path=""']
+      AND pg_catalog.has_function_privilege(
+        'twogethera_membership_owner', claim_helper.oid, 'EXECUTE'
+      )
+  ) <> 2 THEN
+    RAISE EXCEPTION 'restricted request-claim helpers are missing or misconfigured';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_proc AS claim_helper
+    JOIN pg_catalog.pg_namespace AS ns ON ns.oid = claim_helper.pronamespace
+    CROSS JOIN (VALUES ('anon'), ('authenticated'), ('service_role')) AS api_role(name)
+    WHERE ns.nspname = 'app_private'
+      AND claim_helper.proname IN ('current_request_role', 'current_request_auth_time')
+      AND pg_catalog.has_function_privilege(api_role.name, claim_helper.oid, 'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'request-claim helpers are executable by an API role';
   END IF;
 END
 $preflight$;
 
-GRANT USAGE ON SCHEMA auth TO twogethera_membership_owner;
-
 DO $privilege_check$
 BEGIN
-  IF NOT pg_catalog.has_schema_privilege(
+  IF pg_catalog.has_schema_privilege(
     'twogethera_membership_owner', 'auth', 'USAGE'
   ) THEN
-    RAISE EXCEPTION 'Auth schema USAGE grant did not take effect';
+    RAISE EXCEPTION 'membership owner unexpectedly has Auth schema USAGE';
   END IF;
 
   IF pg_catalog.has_schema_privilege(
@@ -127,13 +154,12 @@ $privilege_check$;
 
 SET LOCAL ROLE twogethera_membership_owner;
 
-DO $auth_helper_check$
+DO $request_claim_helper_check$
 BEGIN
-  PERFORM auth.role();
-  PERFORM auth.uid();
-  PERFORM auth.jwt();
+  PERFORM app_private.current_request_role();
+  PERFORM app_private.current_request_auth_time();
 END
-$auth_helper_check$;
+$request_claim_helper_check$;
 
 RESET ROLE;
 COMMIT;

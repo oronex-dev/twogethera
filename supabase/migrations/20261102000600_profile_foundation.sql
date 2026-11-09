@@ -1,13 +1,10 @@
--- CP-009A: personal profile records and a private, partner-readable avatar.
+-- CP-009A: personal profile records. Profile photos are disabled for Private Beta V1.
 -- This migration does not alter couple membership or archive behavior.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
 
-GRANT USAGE ON SCHEMA storage TO twogethera_membership_owner;
-GRANT EXECUTE ON FUNCTION storage.foldername(text)
-  TO twogethera_membership_owner;
 GRANT CREATE ON SCHEMA public TO twogethera_membership_owner;
 
 SET LOCAL ROLE twogethera_membership_owner;
@@ -26,24 +23,6 @@ REVOKE ALL ON FUNCTION app_private.can_manage_profile(uuid)
   FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION app_private.can_manage_profile(uuid) TO authenticated;
 
-CREATE FUNCTION app_private.can_write_profile_photo(p_object_name text)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = ''
-AS $function$
-  SELECT app_private.current_identity_is_verified(false) IS NOT NULL
-    AND (storage.foldername(p_object_name))[1]
-        = app_private.current_identity_is_verified(false)::text
-$function$;
-ALTER FUNCTION app_private.can_write_profile_photo(text)
-  OWNER TO twogethera_membership_owner;
-REVOKE ALL ON FUNCTION app_private.can_write_profile_photo(text)
-  FROM PUBLIC, anon, service_role;
-GRANT EXECUTE ON FUNCTION app_private.can_write_profile_photo(text)
-  TO authenticated;
-
 CREATE TABLE public.user_profiles (
   user_id uuid PRIMARY KEY,
   display_name text NOT NULL
@@ -53,7 +32,7 @@ CREATE TABLE public.user_profiles (
   created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT statement_timestamp(),
   revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
-  CHECK (avatar_path IS NULL OR avatar_path = user_id::text || '/avatar')
+  CHECK (avatar_path IS NULL)
 );
 
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
@@ -94,41 +73,6 @@ GRANT INSERT (user_id, display_name, about, avatar_path)
   ON public.user_profiles TO authenticated;
 GRANT UPDATE (display_name, about, avatar_path)
   ON public.user_profiles TO authenticated;
-
-CREATE FUNCTION app_private.can_read_partner_profile_photo(p_object_name text)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = ''
-AS $function$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.couple_memberships AS actor
-    JOIN public.couple_spaces AS space
-      ON space.id = actor.couple_id AND space.state = 'paired'
-    JOIN public.couple_memberships AS partner
-      ON partner.couple_id = actor.couple_id
-     AND partner.state = 'active'
-     AND partner.user_id <> actor.user_id
-    JOIN public.user_profiles AS profile
-      ON profile.user_id = partner.user_id
-     AND profile.avatar_path = p_object_name
-    WHERE actor.user_id = app_private.current_identity_is_verified(false)
-      AND actor.state = 'active'
-      AND 2 = (
-        SELECT count(*) FROM public.couple_memberships AS active_member
-        WHERE active_member.couple_id = actor.couple_id
-          AND active_member.state = 'active'
-      )
-  )
-$function$;
-ALTER FUNCTION app_private.can_read_partner_profile_photo(text)
-  OWNER TO twogethera_membership_owner;
-REVOKE ALL ON FUNCTION app_private.can_read_partner_profile_photo(text)
-  FROM PUBLIC, anon, service_role;
-GRANT EXECUTE ON FUNCTION app_private.can_read_partner_profile_photo(text)
-  TO authenticated;
 
 CREATE FUNCTION public.partner_profile()
 RETURNS jsonb
@@ -204,7 +148,7 @@ GRANT EXECUTE ON FUNCTION public.ensure_account() TO authenticated;
 
 REVOKE ALL ON FUNCTION app_private.touch_user_profile()
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT, INSERT, UPDATE ON public.user_profiles TO twogethera_membership_owner;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_profiles TO twogethera_membership_owner;
 
 RESET ROLE;
 REVOKE CREATE ON SCHEMA public FROM twogethera_membership_owner;
@@ -234,48 +178,5 @@ REVOKE ALL ON FUNCTION app_private.auth_display_name_for_current_user()
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION app_private.auth_display_name_for_current_user()
   TO twogethera_membership_owner;
-
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-  'profile-photos', 'profile-photos', false, 5242880,
-  ARRAY['image/png']::text[]
-)
-ON CONFLICT (id) DO UPDATE SET
-  name = EXCLUDED.name,
-  public = false,
-  file_size_limit = EXCLUDED.file_size_limit,
-  allowed_mime_types = EXCLUDED.allowed_mime_types;
-
-CREATE POLICY profile_photos_authenticated_select
-  ON storage.objects FOR SELECT TO authenticated
-  USING (
-    bucket_id = 'profile-photos'
-    AND (
-      app_private.can_write_profile_photo(name)
-      OR app_private.can_read_partner_profile_photo(name)
-    )
-  );
-CREATE POLICY profile_photos_owner_insert
-  ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'profile-photos'
-    AND app_private.can_write_profile_photo(name)
-  );
-CREATE POLICY profile_photos_owner_update
-  ON storage.objects FOR UPDATE TO authenticated
-  USING (
-    bucket_id = 'profile-photos'
-    AND app_private.can_write_profile_photo(name)
-  )
-  WITH CHECK (
-    bucket_id = 'profile-photos'
-    AND app_private.can_write_profile_photo(name)
-  );
-CREATE POLICY profile_photos_owner_delete
-  ON storage.objects FOR DELETE TO authenticated
-  USING (
-    bucket_id = 'profile-photos'
-    AND (storage.foldername(name))[1] = app_private.current_identity_is_verified(false)::text
-  );
 
 COMMIT;

@@ -9,6 +9,7 @@ import '../../profile/presentation/profile_sections.dart';
 import '../../legal/presentation/legal_document_screen.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
 import 'auth_components.dart';
+import 'recent_reauthentication_dialog.dart';
 
 class AuthWelcomeScreen extends ConsumerWidget {
   const AuthWelcomeScreen({super.key});
@@ -245,9 +246,14 @@ class LocalAccountScreen extends ConsumerWidget {
                           actionLabel: 'Close for both',
                         );
                         if (!confirmed || !context.mounted) return;
-                        final completed = await ref
-                            .read(authControllerProvider.notifier)
-                            .closeCoupleSpace();
+                        final completed =
+                            await runSensitiveActionWithReauthentication(
+                              context,
+                              ref,
+                              () => ref
+                                  .read(authControllerProvider.notifier)
+                                  .closeCoupleSpace(),
+                            );
                         if (completed && context.mounted) {
                           context.go('/auth/local');
                         }
@@ -271,9 +277,14 @@ class LocalAccountScreen extends ConsumerWidget {
                           actionLabel: 'Request deletion',
                         );
                         if (!confirmed || !context.mounted) return;
-                        final completed = await ref
-                            .read(authControllerProvider.notifier)
-                            .deleteAccount();
+                        final completed =
+                            await runSensitiveActionWithReauthentication(
+                              context,
+                              ref,
+                              () => ref
+                                  .read(authControllerProvider.notifier)
+                                  .deleteAccount(),
+                            );
                         if (completed && context.mounted) {
                           context.go('/auth/local');
                         }
