@@ -78,6 +78,8 @@ class _IdentityCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
             gradient: LinearGradient(
+              begin: BrandColors.of(context).heroBegin,
+              end: BrandColors.of(context).heroFinish,
               colors: [
                 BrandColors.of(context).heroStart,
                 BrandColors.of(context).heroEnd,

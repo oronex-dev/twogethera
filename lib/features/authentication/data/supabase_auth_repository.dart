@@ -7,6 +7,9 @@ import '../../dashboard/domain/dashboard_preferences.dart';
 import '../../appearance/domain/appearance_preferences.dart';
 import '../../budget/domain/budget_models.dart';
 import '../../memories/domain/memory_models.dart';
+import '../../date_nights/domain/date_night_models.dart';
+import '../../goals/domain/shared_goal_models.dart';
+import '../domain/password_policy.dart';
 import '../domain/auth_repository.dart';
 import '../../partner_linking/domain/partner_invitation_repository.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
@@ -16,13 +19,18 @@ import 'local_auth_clients.dart';
 class SupabaseAuthRepository
     implements
         AuthExperienceRepository,
+        PrivateBetaAccountLifecycleRepository,
+        PrivacyRemovalRepository,
         PartnerInvitationRepository,
         SharedPlannerRepository,
+        SharedContentRecoveryRepository,
         DashboardPreferencesRepository,
         AppearancePreferencesRepository,
         ProfileRepository,
         BudgetRepository,
-        MemoriesRepository {
+        MemoriesRepository,
+        DateNightRepository,
+        SharedGoalsRepository {
   SupabaseAuthRepository({
     required this._createClients,
     this.allowRealAccounts = false,
@@ -38,6 +46,7 @@ class SupabaseAuthRepository
   int _generation = 0;
   bool _disposed = false;
   Future<void>? _refresh;
+  final Map<String, String> _pendingPrivacyOperationIds = {};
   @override
   Stream<AuthSignal> get changes => _changes.stream;
 
@@ -180,6 +189,144 @@ class SupabaseAuthRepository
   @override
   Future<void> signOut() => _logout(SignOutScope.local);
 
+  @override
+  Future<void> closeCoupleSpace(String operationId) async {
+    final clients = _authorizedClients();
+    try {
+      final result = await clients.data
+          .schema('public')
+          .rpc(
+            'close_my_couple_space',
+            params: {'p_operation_id': operationId},
+          );
+      if (result is! Map || result['status'] != 'closed') {
+        throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+      }
+      await _discard(AuthSignal.cleared);
+    } on AuthFailure {
+      rethrow;
+    } on FunctionException catch (error) {
+      if (error.status == 403 &&
+          error.details.toString().contains('recent_sign_in_required')) {
+        throw const AuthFailure(AuthProblem.reauthenticationRequired);
+      }
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    } catch (_) {
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    }
+  }
+
+  @override
+  Future<void> deleteAccount(String operationId) async {
+    final clients = _authorizedClients();
+    try {
+      final response = await clients.data.functions.invoke(
+        'delete-account',
+        body: {'operation_id': operationId},
+      );
+      final responseBody = response.data;
+      if (response.status != 200 && response.status != 202) {
+        throw AuthFailure(
+          response.status == 403
+              ? AuthProblem.reauthenticationRequired
+              : AuthProblem.lifecycleUnavailable,
+        );
+      }
+      if (responseBody is! Map ||
+          !{'completed', 'processing'}.contains(responseBody['status'])) {
+        throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+      }
+      await _discard(AuthSignal.cleared);
+    } on AuthFailure {
+      rethrow;
+    } on FunctionException catch (error) {
+      if (error.status == 403 &&
+          error.details.toString().contains('recent_sign_in_required')) {
+        throw const AuthFailure(AuthProblem.reauthenticationRequired);
+      }
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    } catch (_) {
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    }
+  }
+
+  @override
+  Future<void> requestPrivacyRemoval({
+    required String table,
+    required String recordId,
+    String? field,
+    bool removeRecord = true,
+  }) async {
+    const allowedTables = {
+      'bucket_list_items',
+      'important_dates',
+      'plans',
+      'plan_tasks',
+      'couple_memories',
+      'date_night_ideas',
+      'shared_goals',
+      'shared_goal_milestones',
+      'couple_expenses',
+      'recurring_expense_rules',
+      'memory_attachments',
+      'expense_receipts',
+    };
+    if (!allowedTables.contains(table)) {
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    }
+    const allowedFields = <String, Set<String>>{
+      'bucket_list_items': {'description'},
+      'important_dates': {'notes'},
+      'plans': {'description', 'location'},
+      'couple_memories': {'caption', 'personal_notes'},
+      'date_night_ideas': {'description', 'location', 'shared_notes'},
+      'shared_goals': {'description'},
+      'shared_goal_milestones': {'description'},
+      'couple_expenses': {'description'},
+      'recurring_expense_rules': {'description'},
+    };
+    if ((field == null && !removeRecord) ||
+        (field != null &&
+            (removeRecord || allowedFields[table]?.contains(field) != true))) {
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    }
+    final clients = _authorizedClients();
+    final operationKey = '$table:$recordId:${field ?? 'record'}';
+    final operationId = _pendingPrivacyOperationIds.putIfAbsent(
+      operationKey,
+      newPartnerOperationId,
+    );
+    try {
+      final requestId = await clients.data
+          .schema('public')
+          .rpc(
+            'record_my_privacy_removal',
+            params: {
+              'p_operation_id': operationId,
+              'p_table': table,
+              'p_record_id': recordId,
+              'p_field': field,
+              'p_remove_record': removeRecord,
+            },
+          );
+      if (requestId is! String) {
+        throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+      }
+      _pendingPrivacyOperationIds.remove(operationKey);
+      clients.validSession();
+    } on AuthFailure {
+      rethrow;
+    } on PostgrestException catch (error) {
+      if (error.code == '42501' &&
+          error.message.toLowerCase().contains('reauthentication')) {
+        throw const AuthFailure(AuthProblem.reauthenticationRequired);
+      }
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    } catch (_) {
+      throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+    }
+  }
+
   Future<void> _logout(SignOutScope scope) async {
     final clients = _clients;
     final session = clients?.acceptedSession;
@@ -247,7 +394,7 @@ class SupabaseAuthRepository
   Future<void> _register(String email, String password, {String? name}) async {
     await _discard(AuthSignal.cleared);
     _synthetic(email);
-    if (password.length < 16) {
+    if (validateNewPassword(password) != null) {
       throw const AuthFailure(AuthProblem.passwordRejected);
     }
     final clients = _open();
@@ -267,11 +414,18 @@ class SupabaseAuthRepository
       }
     } on AuthFailure {
       rethrow;
+    } on AuthException catch (error) {
+      _current(clients, version);
+      throw AuthFailure.registrationResponse(
+        code: error.code,
+        transient: _transient(error),
+      );
     } catch (error) {
+      _current(clients, version);
       throw AuthFailure(
         _transient(error)
             ? AuthProblem.unavailable
-            : AuthProblem.passwordRejected,
+            : AuthProblem.registrationRejected,
       );
     }
   }
@@ -334,20 +488,33 @@ class SupabaseAuthRepository
         : uri != null &&
               uri.scheme == 'http' &&
               {'127.0.0.1', 'localhost', '10.0.2.2'}.contains(uri.host);
+    final query = uri?.queryParametersAll;
+    final tokenKey = query?.containsKey('token_hash') == true
+        ? 'token_hash'
+        : query?.containsKey('token') == true
+        ? 'token'
+        : null;
+    final expectedKeys = {
+      ?tokenKey,
+      'type',
+      if (query?.containsKey('redirect_to') == true) 'redirect_to',
+    };
     if (uri == null ||
         !trustedOrigin ||
         uri.port != clients.endpoint.port ||
         uri.path != '/auth/v1/verify' ||
         uri.userInfo.isNotEmpty ||
         uri.hasFragment ||
-        uri.queryParameters['type'] != type ||
-        uri.queryParametersAll.length != 2 ||
+        tokenKey == null ||
+        query!.keys.toSet().difference(expectedKeys).isNotEmpty ||
+        query.length != expectedKeys.length ||
+        query.values.any((values) => values.length != 1) ||
+        query['type']!.single != type ||
         link.length > 8192) {
       throw const AuthFailure(AuthProblem.invalidLink);
     }
-    final hash =
-        uri.queryParameters['token'] ?? uri.queryParameters['token_hash'];
-    if (hash == null || hash.isEmpty) {
+    final hash = query[tokenKey]!.single;
+    if (hash.isEmpty) {
       throw const AuthFailure(AuthProblem.invalidLink);
     }
     try {
@@ -373,7 +540,7 @@ class SupabaseAuthRepository
 
   @override
   Future<void> updatePassword(String password) async {
-    if (password.length < 16) {
+    if (validateNewPassword(password) != null) {
       throw const AuthFailure(AuthProblem.passwordRejected);
     }
     final clients = _clients;
@@ -605,6 +772,9 @@ class SupabaseAuthRepository
             bytes,
             fileOptions: const FileOptions(
               contentType: 'image/png',
+              // The object uses a stable per-user path; prevent browsers/CDN
+              // caches from serving the prior image after an upsert.
+              cacheControl: '0',
               upsert: true,
             ),
           );
@@ -755,6 +925,56 @@ class SupabaseAuthRepository
       'p_invitation_id': invitationId,
     });
     if (data['status'] != 'revoked') throw const PartnerInvitationFailure();
+  }
+
+  @override
+  Future<List<RecoverableSharedRecord>> listRecoverableSharedRecords() async {
+    final clients = _authorizedClients();
+    try {
+      final data = await clients.data
+          .schema('public')
+          .rpc('list_my_recoverable_shared_records');
+      if (data is! List) throw const SharedPlannerFailure();
+      return data
+          .whereType<Map>()
+          .map(
+            (row) => RecoverableSharedRecord.fromJson(
+              Map<String, dynamic>.from(row),
+            ),
+          )
+          .toList(growable: false);
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<bool> restoreSharedRecord(RecoverableSharedRecord record) async {
+    final clients = _authorizedClients();
+    if (!const {
+      'bucket_list_items',
+      'important_dates',
+      'plans',
+      'plan_tasks',
+      'couple_memories',
+      'date_night_ideas',
+      'shared_goals',
+      'shared_goal_milestones',
+    }.contains(record.table)) {
+      return false;
+    }
+    try {
+      final result = await clients.data
+          .schema('public')
+          .rpc(
+            'restore_my_shared_record',
+            params: {'p_table': record.table, 'p_record_id': record.id},
+          );
+      clients.validSession();
+      return result == true;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
   }
 
   LocalAuthClients _authorizedClients() {
@@ -1049,7 +1269,12 @@ class SupabaseAuthRepository
       final row = await clients.data
           .schema('public')
           .from('user_dashboard_preferences')
-          .select('appearance_mode,appearance_theme,appearance_custom_hex')
+          .select(
+            'appearance_mode,appearance_theme,appearance_custom_hex,'
+            'appearance_font_size,appearance_gradient_preset,'
+            'appearance_gradient_start_hex,appearance_gradient_end_hex,'
+            'appearance_gradient_direction',
+          )
           .eq('user_id', userId)
           .maybeSingle();
       clients.validSession();
@@ -1148,26 +1373,43 @@ class SupabaseAuthRepository
             (row) => CoupleExpense.fromJson(Map<String, dynamic>.from(row)),
           ),
         );
-        final ruleRows = await data
-            .from('recurring_expense_rules')
-            .select()
-            .eq('couple_id', coupleId)
-            .eq('active', true)
-            .eq('currency_code', budget.currency.code)
-            .order('starts_on');
-        rules.addAll(
-          (ruleRows as List).map(
-            (row) =>
-                RecurringExpenseRule.fromJson(Map<String, dynamic>.from(row)),
-          ),
-        );
       }
+      // Schedules are independent of a month-specific budget. Load them even
+      // when the selected month has no budget, so they remain reviewable after
+      // month navigation or refresh.
+      final ruleRows = await data
+          .from('recurring_expense_rules')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('starts_on');
+      rules.addAll(
+        (ruleRows as List).map(
+          (row) =>
+              RecurringExpenseRule.fromJson(Map<String, dynamic>.from(row)),
+        ),
+      );
+      final occurrenceRows = await data
+          .from('couple_expenses')
+          .select('recurring_rule_id,recurrence_key')
+          .eq('couple_id', coupleId)
+          .not('recurring_rule_id', 'is', null)
+          .order('recurrence_key');
+      final occurrences = (occurrenceRows as List)
+          .map((row) {
+            final map = Map<String, dynamic>.from(row);
+            return RecurringExpenseOccurrence(
+              ruleId: map['recurring_rule_id'] as String,
+              date: DateTime.parse(map['recurrence_key'] as String),
+            );
+          })
+          .toList(growable: false);
       clients.validSession();
       return BudgetSnapshot(
         budget: budget,
         expenses: List.unmodifiable(expenses),
         recurringRules: List.unmodifiable(rules),
         members: List.unmodifiable(memberList),
+        recurringOccurrences: List.unmodifiable(occurrences),
       );
     } catch (_) {
       throw const SharedPlannerFailure();
@@ -1194,8 +1436,12 @@ class SupabaseAuthRepository
         'limit_minor': limitMinor,
       }, onConflict: 'couple_id,month_start');
       clients.validSession();
+    } on PostgrestException catch (error) {
+      throw BudgetOperationFailure.fromPostgresCode(error.code);
     } catch (_) {
-      throw const SharedPlannerFailure();
+      throw const BudgetOperationFailure(
+        'The monthly budget could not be saved. Refresh and try again.',
+      );
     }
   }
 
@@ -1221,8 +1467,12 @@ class SupabaseAuthRepository
         onConflict: 'budget_id,category_key',
       );
       clients.validSession();
+    } on PostgrestException catch (error) {
+      throw BudgetOperationFailure.fromPostgresCode(error.code);
     } catch (_) {
-      throw const SharedPlannerFailure();
+      throw const BudgetOperationFailure(
+        'The category limit could not be saved. Refresh and try again.',
+      );
     }
   }
 
@@ -1258,8 +1508,12 @@ class SupabaseAuthRepository
         if (result == null) throw const SharedPlannerFailure();
       }
       clients.validSession();
+    } on PostgrestException catch (error) {
+      throw BudgetOperationFailure.fromPostgresCode(error.code);
     } catch (_) {
-      throw const SharedPlannerFailure();
+      throw const BudgetOperationFailure(
+        'The expense could not be saved. Refresh and try again.',
+      );
     }
   }
 
@@ -1287,17 +1541,79 @@ class SupabaseAuthRepository
   @override
   Future<void> saveRecurringRule(
     String coupleId,
-    Map<String, dynamic> values,
+    Map<String, dynamic> values, {
+    String? ruleId,
+    int? expectedRevision,
+  }) async {
+    final clients = _authorizedClients();
+    try {
+      final table = clients.data
+          .schema('public')
+          .from('recurring_expense_rules');
+      if (ruleId == null) {
+        await table.insert({...values, 'couple_id': coupleId});
+      } else {
+        if (expectedRevision == null) {
+          throw const BudgetOperationFailure(
+            'Refresh the schedule before editing it.',
+          );
+        }
+        final result = await table
+            .update(values)
+            .eq('couple_id', coupleId)
+            .eq('id', ruleId)
+            .eq('revision', expectedRevision)
+            .select('id')
+            .maybeSingle();
+        if (result == null) {
+          throw const BudgetOperationFailure(
+            'This schedule changed on another device. Refresh and try again.',
+          );
+        }
+      }
+      clients.validSession();
+    } on BudgetOperationFailure {
+      rethrow;
+    } on PostgrestException catch (error) {
+      throw BudgetOperationFailure.fromPostgresCode(error.code);
+    } catch (_) {
+      throw const BudgetOperationFailure(
+        'The recurring schedule could not be saved. Refresh and try again.',
+      );
+    }
+  }
+
+  @override
+  Future<void> setRecurringRuleActive(
+    String coupleId,
+    RecurringExpenseRule rule,
+    bool active,
   ) async {
     final clients = _authorizedClients();
     try {
-      await clients.data
+      final result = await clients.data
           .schema('public')
           .from('recurring_expense_rules')
-          .insert({...values, 'couple_id': coupleId});
+          .update({'active': active})
+          .eq('couple_id', coupleId)
+          .eq('id', rule.id)
+          .eq('revision', rule.revision)
+          .select('id')
+          .maybeSingle();
+      if (result == null) {
+        throw const BudgetOperationFailure(
+          'This schedule changed on another device. Refresh and try again.',
+        );
+      }
       clients.validSession();
+    } on BudgetOperationFailure {
+      rethrow;
+    } on PostgrestException catch (error) {
+      throw BudgetOperationFailure.fromPostgresCode(error.code);
     } catch (_) {
-      throw const SharedPlannerFailure();
+      throw const BudgetOperationFailure(
+        'The recurring schedule could not be changed. Refresh and try again.',
+      );
     }
   }
 
@@ -1311,6 +1627,13 @@ class SupabaseAuthRepository
   ) async {
     final clients = _authorizedClients();
     final date = DateTime(occurrence.year, occurrence.month, occurrence.day);
+    if (!rule.active ||
+        rule.currency.code != currency.code ||
+        rule.occurrencesBetween(date, date).isEmpty) {
+      throw const BudgetOperationFailure(
+        'Choose an active scheduled occurrence in the schedule currency.',
+      );
+    }
     final splitA = rule.splitAMinor;
     try {
       await clients.data.schema('public').from('couple_expenses').insert({
@@ -1333,8 +1656,15 @@ class SupabaseAuthRepository
         'recurrence_key': _dateKey(date),
       });
       clients.validSession();
+    } on PostgrestException catch (error) {
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        duplicateOccurrence: true,
+      );
     } catch (_) {
-      throw const SharedPlannerFailure();
+      throw const BudgetOperationFailure(
+        'The occurrence could not be recorded. Refresh and try again.',
+      );
     }
   }
 
@@ -1695,6 +2025,277 @@ class SupabaseAuthRepository
           .download(objectPath);
       clients.validSession();
       return bytes;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  Future<String> _runRevisionCommand(
+    String function,
+    Map<String, dynamic> params,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      final result = await clients.data
+          .schema('public')
+          .rpc(function, params: params);
+      clients.validSession();
+      if (result is! String ||
+          !{'updated', 'conflict', 'unavailable', 'invalid'}.contains(result)) {
+        throw const SharedPlannerFailure();
+      }
+      return result;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<DateNightSnapshot> loadDateNights(String coupleId) async {
+    final clients = _authorizedClients();
+    try {
+      final data = clients.data.schema('public');
+      final rows = await data
+          .from('date_night_ideas')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('scheduled_on', nullsFirst: false)
+          .order('created_at', ascending: false);
+      final plans = await data
+          .from('plans')
+          .select('id,title')
+          .eq('couple_id', coupleId)
+          .order('starts_at');
+      final rawIdeas = (rows as List).cast<Map>();
+      final ids = rawIdeas.map((row) => row['id'] as String).toList();
+      final rawVotes = ids.isEmpty
+          ? const <Map>[]
+          : (await data
+                    .from('date_night_votes')
+                    .select('idea_id,user_id,response')
+                    .eq('couple_id', coupleId)
+                    .inFilter('idea_id', ids))
+                as List;
+      final grouped = <String, Map<String, String>>{};
+      for (final row in rawVotes.cast<Map>()) {
+        final vote = Map<String, dynamic>.from(row);
+        (grouped[vote['idea_id'] as String] ??= {})[vote['user_id'] as String] =
+            vote['response'] as String;
+      }
+      clients.validSession();
+      return DateNightSnapshot(
+        List.unmodifiable(
+          rawIdeas.map(
+            (row) => DateNightIdea.fromJson(
+              Map<String, dynamic>.from(row),
+              votes: grouped[row['id'] as String] ?? const {},
+            ),
+          ),
+        ),
+        List.unmodifiable(
+          (plans as List).map((row) {
+            final value = Map<String, dynamic>.from(row);
+            return (id: value['id'] as String, title: value['title'] as String);
+          }),
+        ),
+      );
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveDateNight(
+    String coupleId,
+    Map<String, dynamic> values, {
+    String? id,
+    int? expectedRevision,
+  }) async {
+    final clients = _authorizedClients();
+    try {
+      final table = clients.data.schema('public').from('date_night_ideas');
+      if (id == null) {
+        await table
+            .insert({...values, 'couple_id': coupleId})
+            .select('id')
+            .single();
+      } else {
+        if (expectedRevision == null) throw const SharedPlannerFailure();
+        final result = await _runRevisionCommand('update_date_night_idea', {
+          'p_couple_id': coupleId,
+          'p_idea_id': id,
+          'p_expected_revision': expectedRevision,
+          'p_changes': values,
+        });
+        if (result == 'conflict') throw const DateNightRevisionConflict();
+        if (result != 'updated') throw const SharedPlannerFailure();
+      }
+      clients.validSession();
+    } on DateNightRevisionConflict {
+      rethrow;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveDateNightVote(
+    String coupleId,
+    String ideaId,
+    String response,
+  ) async {
+    final clients = _authorizedClients();
+    try {
+      if (!{'interested', 'not_for_me'}.contains(response)) {
+        throw const SharedPlannerFailure();
+      }
+      final data = clients.data.schema('public');
+      final userId = clients.validSession().user.id;
+      final current = await data
+          .from('date_night_votes')
+          .select('idea_id')
+          .eq('couple_id', coupleId)
+          .eq('idea_id', ideaId)
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (current == null) {
+        await data.from('date_night_votes').insert({
+          'couple_id': coupleId,
+          'idea_id': ideaId,
+          'user_id': userId,
+          'response': response,
+        });
+      } else {
+        await data
+            .from('date_night_votes')
+            .update({'response': response})
+            .eq('couple_id', coupleId)
+            .eq('idea_id', ideaId)
+            .eq('user_id', userId);
+      }
+      clients.validSession();
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<SharedGoalsSnapshot> loadSharedGoals(String coupleId) async {
+    final clients = _authorizedClients();
+    try {
+      final data = clients.data.schema('public');
+      final goals = await data
+          .from('shared_goals')
+          .select()
+          .eq('couple_id', coupleId)
+          .order('created_at', ascending: false);
+      final ids = (goals as List)
+          .cast<Map>()
+          .map((row) => row['id'] as String)
+          .toList();
+      final milestoneRows = ids.isEmpty
+          ? const <Map>[]
+          : (await data
+                    .from('shared_goal_milestones')
+                    .select()
+                    .eq('couple_id', coupleId)
+                    .inFilter('goal_id', ids)
+                    .order('sort_order')
+                    .order('created_at'))
+                as List;
+      final grouped = <String, List<SharedGoalMilestone>>{};
+      for (final row in milestoneRows.cast<Map>()) {
+        final milestone = SharedGoalMilestone.fromJson(
+          Map<String, dynamic>.from(row),
+        );
+        (grouped[milestone.goalId] ??= []).add(milestone);
+      }
+      clients.validSession();
+      return SharedGoalsSnapshot(
+        List.unmodifiable(
+          (goals).cast<Map>().map(
+            (row) => SharedGoal.fromJson(
+              Map<String, dynamic>.from(row),
+              milestones: grouped[row['id'] as String] ?? const [],
+            ),
+          ),
+        ),
+      );
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveSharedGoal(
+    String coupleId,
+    Map<String, dynamic> values, {
+    String? id,
+    int? expectedRevision,
+  }) async {
+    final clients = _authorizedClients();
+    try {
+      final table = clients.data.schema('public').from('shared_goals');
+      if (id == null) {
+        await table
+            .insert({...values, 'couple_id': coupleId})
+            .select('id')
+            .single();
+      } else {
+        if (expectedRevision == null) throw const SharedPlannerFailure();
+        final result = await _runRevisionCommand('update_shared_goal', {
+          'p_couple_id': coupleId,
+          'p_goal_id': id,
+          'p_expected_revision': expectedRevision,
+          'p_changes': values,
+        });
+        if (result == 'conflict') throw const SharedGoalRevisionConflict();
+        if (result != 'updated') throw const SharedPlannerFailure();
+      }
+      clients.validSession();
+    } on SharedGoalRevisionConflict {
+      rethrow;
+    } catch (_) {
+      throw const SharedPlannerFailure();
+    }
+  }
+
+  @override
+  Future<void> saveMilestone(
+    String coupleId,
+    String goalId,
+    Map<String, dynamic> values, {
+    String? id,
+    int? expectedRevision,
+  }) async {
+    final clients = _authorizedClients();
+    try {
+      final table = clients.data
+          .schema('public')
+          .from('shared_goal_milestones');
+      if (id == null) {
+        await table
+            .insert({...values, 'couple_id': coupleId, 'goal_id': goalId})
+            .select('id')
+            .single();
+      } else {
+        if (expectedRevision == null) throw const SharedPlannerFailure();
+        final result = await _runRevisionCommand(
+          'update_shared_goal_milestone',
+          {
+            'p_couple_id': coupleId,
+            'p_goal_id': goalId,
+            'p_milestone_id': id,
+            'p_expected_revision': expectedRevision,
+            'p_changes': values,
+          },
+        );
+        if (result == 'conflict') throw const SharedGoalRevisionConflict();
+        if (result != 'updated') throw const SharedPlannerFailure();
+      }
+      clients.validSession();
+    } on SharedGoalRevisionConflict {
+      rethrow;
     } catch (_) {
       throw const SharedPlannerFailure();
     }

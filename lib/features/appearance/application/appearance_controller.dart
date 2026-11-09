@@ -129,6 +129,40 @@ class AppearanceController extends Notifier<AppearanceState> {
     notice: '${state.preferences.theme.label} palette restored.',
   );
 
+  Future<bool> setFontSize(PersonalFontSize size) => _update(
+    state.preferences.copyWith(fontSize: size),
+    notice: '${size.label} text size selected.',
+  );
+
+  Future<bool> selectGradientPreset(
+    GradientPreset preset, {
+    GradientDirection? direction,
+  }) => _update(
+    state.preferences.copyWith(
+      gradientPreset: preset,
+      gradientDirection: direction,
+      clearGradientColors: true,
+    ),
+    notice: '${preset.label} gradient selected.',
+  );
+
+  Future<bool> applyCustomGradient({
+    required Color start,
+    required Color end,
+    required GradientDirection direction,
+  }) => _update(
+    state.preferences.copyWith(
+      gradientPreset: GradientPreset.custom,
+      gradientStartHex: _hex(start),
+      gradientEndHex: _hex(end),
+      gradientDirection: direction,
+    ),
+    notice: 'Custom gradient applied.',
+  );
+
+  String _hex(Color color) =>
+      '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+
   Future<bool> _update(
     AppearancePreferences next, {
     required String notice,

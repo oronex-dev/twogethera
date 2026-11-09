@@ -1,14 +1,14 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:twogethera/core/config/local_auth_config.dart';
+import 'package:twogethera/core/config/app_config.dart';
 import 'package:twogethera/features/authentication/presentation/auth_callback_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:twogethera/app/routing/app_router.dart';
 import 'package:twogethera/features/authentication/application/auth_controller.dart';
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
+import 'package:twogethera/features/authentication/domain/password_policy.dart';
 import 'package:twogethera/features/authentication/presentation/auth_components.dart';
 import 'package:twogethera/app/theme/theme_mode_controller.dart';
 import 'package:twogethera/features/dashboard/domain/dashboard_preferences.dart';
@@ -18,10 +18,13 @@ import 'authentication_test.dart' show setup, show, config;
 
 // UI/controller doubles only. Genuine Supabase results are a separate suite.
 class ExperienceFake extends LifecycleFake
-    implements AuthExperienceRepository, DashboardPreferencesRepository {
+    implements
+        AuthExperienceRepository,
+        DashboardPreferencesRepository,
+        PrivateBetaAccountLifecycleRepository {
   int registrations = 0, resends = 0, resets = 0;
-  String? name;
-  Completer<void>? registrationWait;
+  int coupleClosures = 0, accountDeletions = 0;
+  AuthProblem? lifecycleFailure;
   final order = <String>[];
   @override
   Future<void> registerProfile(
@@ -30,8 +33,6 @@ class ExperienceFake extends LifecycleFake
     String displayName,
   ) async {
     registrations++;
-    name = displayName;
-    await registrationWait?.future;
   }
 
   @override
@@ -67,6 +68,20 @@ class ExperienceFake extends LifecycleFake
     String userId,
     DashboardPreferences preferences,
   ) async {}
+
+  @override
+  Future<void> closeCoupleSpace(String operationId) async {
+    if (lifecycleFailure case final failure?) throw AuthFailure(failure);
+    coupleClosures++;
+    events.add(AuthSignal.cleared);
+  }
+
+  @override
+  Future<void> deleteAccount(String operationId) async {
+    if (lifecycleFailure case final failure?) throw AuthFailure(failure);
+    accountDeletions++;
+    events.add(AuthSignal.cleared);
+  }
 }
 
 Finder key(String value) => find.byKey(ValueKey(value));
@@ -76,21 +91,57 @@ Future<void> tap(WidgetTester tester, String text) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> registration(
-  WidgetTester tester, {
-  String confirm = 'a long synthetic password',
-}) async {
-  await tester.enterText(key('auth-display-name'), 'River');
-  await tester.enterText(key('lifecycle-email'), 'river@example.invalid');
-  await tester.enterText(
-    key('lifecycle-password'),
-    'a long synthetic password',
-  );
-  await tester.enterText(key('auth-confirm-password'), confirm);
-}
-
 void main() {
-  testWidgets('welcome actions and back preserve preview navigation', (
+  for (final environment in [
+    AppEnvironment.development,
+    AppEnvironment.staging,
+    AppEnvironment.production,
+  ]) {
+    testWidgets('${environment.name} keeps public registration closed', (
+      tester,
+    ) async {
+      final fake = ExperienceFake();
+      final c = setup(fake, environment: environment);
+      addTearDown(c.dispose);
+      addTearDown(fake.dispose);
+      await show(tester, c, '/auth/register');
+      expect(
+        find.textContaining('New account registration is closed.'),
+        findsOneWidget,
+      );
+      expect(key('lifecycle-password'), findsNothing);
+    });
+  }
+
+  for (final entry in [
+    (
+      environment: AppEnvironment.development,
+      expected: 'Local preview · Synthetic accounts only.',
+    ),
+    (environment: AppEnvironment.staging, expected: 'Private beta staging ·'),
+    (
+      environment: AppEnvironment.production,
+      expected: 'For your privacy, sign in again',
+    ),
+  ]) {
+    testWidgets('auth disclosure matches ${entry.environment.name}', (
+      tester,
+    ) async {
+      final fake = ExperienceFake();
+      final c = setup(fake, environment: entry.environment);
+      addTearDown(c.dispose);
+      addTearDown(fake.dispose);
+      await show(tester, c, '/auth/welcome');
+
+      expect(find.textContaining(entry.expected), findsOneWidget);
+      if (entry.environment == AppEnvironment.production) {
+        expect(find.textContaining('Local preview'), findsNothing);
+        expect(find.textContaining('Synthetic accounts only'), findsNothing);
+      }
+    });
+  }
+
+  testWidgets('welcome registration link explains closed private beta', (
     tester,
   ) async {
     final fake = ExperienceFake();
@@ -99,83 +150,34 @@ void main() {
     addTearDown(fake.dispose);
     await show(tester, c, '/auth/welcome');
     await tap(tester, 'Create account');
-    expect(key('auth-display-name'), findsOneWidget);
-    await tester.tap(find.byTooltip('Back to sign-in'));
-    await tester.pumpAndSettle();
-    expect(key('auth-email'), findsOneWidget);
+    expect(
+      find.textContaining('New account registration is closed.'),
+      findsOneWidget,
+    );
+    expect(key('auth-display-name'), findsNothing);
+    expect(fake.registrations, 0);
   });
-  testWidgets(
-    'registration rejects empty and mismatched values without a request',
-    (tester) async {
+
+  test(
+    'closing a couple clears local auth only after repository success',
+    () async {
       final fake = ExperienceFake();
       final c = setup(fake);
       addTearDown(c.dispose);
       addTearDown(fake.dispose);
-      await show(tester, c, '/auth/register');
-      await tap(tester, 'Create account');
-      expect(fake.registrations, 0);
-      expect(find.text('Enter a valid email address.'), findsOneWidget);
-      await registration(tester, confirm: 'different synthetic password');
-      await tap(tester, 'Create account');
-      expect(find.text('Your passwords need to match.'), findsOneWidget);
-      expect(fake.registrations, 0);
-    },
-  );
-  testWidgets(
-    'registration is single-flight, clears passwords and routes to verification',
-    (tester) async {
-      final fake = ExperienceFake()..registrationWait = Completer<void>();
-      final c = setup(fake);
-      addTearDown(c.dispose);
-      addTearDown(fake.dispose);
-      await show(tester, c, '/auth/register');
-      await registration(tester);
-      await tester.ensureVisible(find.text('Create account'));
-      await tester.tap(find.text('Create account'));
-      await tester.pump();
-      expect(fake.registrations, 1);
-      expect(fake.name, 'River');
-      final passwords = tester
-          .widgetList<TextField>(find.byType(TextField))
-          .where((f) => f.obscureText);
-      expect(passwords.every((f) => f.controller!.text.isEmpty), isTrue);
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
-      await c
-          .read(authControllerProvider.notifier)
-          .register('a@example.invalid', 'synthetic');
-      expect(fake.registrations, 1);
-      fake.registrationWait!.complete();
-      await tester.pumpAndSettle();
-      expect(
-        c.read(appRouterProvider).routeInformationProvider.value.uri.path,
-        '/auth/verify',
-      );
-      expect(c.read(authControllerProvider).context, isNull);
-    },
-  );
-  testWidgets(
-    'back during registration cancels late navigation and authority',
-    (tester) async {
-      final fake = ExperienceFake()..registrationWait = Completer<void>();
-      final c = setup(fake);
-      addTearDown(c.dispose);
-      addTearDown(fake.dispose);
-      await show(tester, c, '/auth/register');
-      await registration(tester);
-      await tester.ensureVisible(find.text('Create account'));
-      await tester.tap(find.text('Create account'));
-      await tester.pump();
-      await tester.tap(find.byTooltip('Back to sign-in'));
-      await tester.pumpAndSettle();
-      expect(fake.logoutCalls, 1);
-      fake.registrationWait!.complete();
-      await tester.pumpAndSettle();
+      final controller = c.read(authControllerProvider.notifier);
+      await controller.signIn('partner@example.invalid', 'synthetic');
+      expect(c.read(authControllerProvider).phase, AuthPhase.authenticated);
+
+      fake.lifecycleFailure = AuthProblem.lifecycleUnavailable;
+      expect(await controller.closeCoupleSpace(), isFalse);
+      expect(c.read(authControllerProvider).phase, AuthPhase.authenticated);
+      expect(fake.coupleClosures, 0);
+
+      fake.lifecycleFailure = null;
+      expect(await controller.closeCoupleSpace(), isTrue);
+      expect(fake.coupleClosures, 1);
       expect(c.read(authControllerProvider).phase, AuthPhase.signedOut);
-      expect(
-        c.read(appRouterProvider).routeInformationProvider.value.uri.path,
-        '/auth/local',
-      );
-      expect(key('account-verified'), findsNothing);
     },
   );
   testWidgets(
@@ -278,16 +280,20 @@ void main() {
           .read(authControllerProvider.notifier)
           .verifyLink('unit-only', recovery: true);
       await show(tester, c, '/auth/recovery');
-      await tester.enterText(
-        key('lifecycle-password'),
-        'a long synthetic password',
-      );
-      await tester.enterText(key('auth-confirm-password'), 'another password');
+      await tester.enterText(key('lifecycle-password'), 'FreshPass1!');
+      await tester.enterText(key('auth-confirm-password'), 'OtherPass1!');
+      await tester.pumpAndSettle();
       await tap(tester, 'Update password');
       expect(fake.resets, 0);
-      await tester.enterText(
-        key('auth-confirm-password'),
-        'a long synthetic password',
+      await tester.enterText(key('auth-confirm-password'), 'FreshPass1!');
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Update password'),
+            )
+            .onPressed,
+        isNotNull,
       );
       await tap(tester, 'Update password');
       expect(fake.resets, 1);
@@ -506,9 +512,11 @@ void main() {
     'local email and password validators preserve synthetic-only boundaries',
     () {
       expect(validateLocalEmail('real@example.com'), isNotNull);
+      expect(validateLocalEmail('not-an-email'), isNotNull);
       expect(validateLocalEmail('invalid'), isNotNull);
       expect(validateLocalEmail('a@example.invalid'), isNull);
       expect(validateNewPassword('short'), isNotNull);
+      expect(validateNewPassword('RiverPass1!'), isNull);
     },
   );
 }

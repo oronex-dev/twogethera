@@ -13,16 +13,28 @@ class LocalAuthConfig {
   /// root local project; earlier auth lifecycle proofs use their isolated API.
   String get dataSchema => endpoint.port == 54321 ? 'public' : 'cp004b2';
 
-  static LocalAuthConfig? fromEnvironment() => parse(
-    enabled: kDebugMode && const bool.fromEnvironment('LOCAL_AUTH_ENABLED'),
-    environment: const String.fromEnvironment(
-      'APP_ENV',
-      defaultValue: 'development',
-    ),
-    url: const String.fromEnvironment('LOCAL_SUPABASE_URL'),
-    publicKey: const String.fromEnvironment('LOCAL_SUPABASE_ANON_KEY'),
-    android: !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
-  );
+  static LocalAuthConfig? fromEnvironment() {
+    final config = parse(
+      enabled: kDebugMode && const bool.fromEnvironment('LOCAL_AUTH_ENABLED'),
+      environment: const String.fromEnvironment(
+        'APP_ENV',
+        defaultValue: 'development',
+      ),
+      url: const String.fromEnvironment('LOCAL_SUPABASE_URL'),
+      publicKey: const String.fromEnvironment('LOCAL_SUPABASE_ANON_KEY'),
+      android: !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
+    );
+    // The Web development build must use the root local project that carries
+    // the current membership and planner schemas. Never send browser requests
+    // to a hosted origin or an isolated auth-test port.
+    if (kIsWeb &&
+        config != null &&
+        (config.endpoint.host != '127.0.0.1' ||
+            config.endpoint.port != 54321)) {
+      return null;
+    }
+    return config;
+  }
 
   static LocalAuthConfig? parse({
     required bool enabled,

@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/theme/design_tokens.dart';
+import '../../../core/config/app_config.dart';
 import '../../appearance/application/appearance_controller.dart';
+import '../domain/password_policy.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
 import '../../../shared/widgets/together_mark.dart';
@@ -30,6 +32,13 @@ class AuthFrame extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = BrandColors.of(context);
     final theme = Theme.of(context);
+    final environment = ref.watch(appConfigProvider).environment;
+    final disclosure = switch (environment) {
+      AppEnvironment.development => 'Local preview · Synthetic accounts only. Your session stays in memory and ends when the app closes.',
+      AppEnvironment.staging => 'Private beta staging · Your session stays in memory and ends when the app closes.',
+      AppEnvironment.production =>
+        'For your privacy, sign in again after refreshing or closing this tab.',
+    };
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -99,9 +108,7 @@ class AuthFrame extends ConsumerWidget {
                       const SizedBox(height: 24),
                       const Divider(),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Local preview · Synthetic accounts only. Your session stays in memory and ends when the app closes.',
-                      ),
+                      Text(disclosure),
                     ],
                   ),
                 ),
@@ -115,8 +122,8 @@ class AuthFrame extends ConsumerWidget {
                       padding: const EdgeInsets.all(40),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+                          begin: colors.heroBegin,
+                          end: colors.heroFinish,
                           colors: [colors.heroStart, colors.heroEnd],
                         ),
                         borderRadius: BorderRadius.circular(36),
@@ -211,6 +218,8 @@ class AuthPasswordField extends StatefulWidget {
     this.enabled = true,
     this.validator,
     this.onSubmitted,
+    this.onChanged,
+    this.showRequirements = false,
     this.action = TextInputAction.done,
   });
   final TextEditingController controller;
@@ -219,6 +228,8 @@ class AuthPasswordField extends StatefulWidget {
   final bool enabled;
   final String? Function(String?)? validator;
   final VoidCallback? onSubmitted;
+  final ValueChanged<String>? onChanged;
+  final bool showRequirements;
   final TextInputAction action;
   @override
   State<AuthPasswordField> createState() => _AuthPasswordFieldState();
@@ -226,31 +237,232 @@ class AuthPasswordField extends StatefulWidget {
 
 class _AuthPasswordFieldState extends State<AuthPasswordField> {
   bool _visible = false;
+  late final FocusNode _focusNode;
+
   @override
-  Widget build(BuildContext context) => TextFormField(
-    key: ValueKey(widget.fieldKey),
-    controller: widget.controller,
-    enabled: widget.enabled,
-    obscureText: !_visible,
-    autocorrect: false,
-    enableSuggestions: false,
-    enableIMEPersonalizedLearning: false,
-    autofillHints: null,
-    textInputAction: widget.action,
-    validator: widget.validator,
-    onFieldSubmitted: (_) => widget.onSubmitted?.call(),
-    decoration: InputDecoration(
-      labelText: widget.label,
-      errorMaxLines: 4,
-      suffixIcon: IconButton(
-        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-        tooltip: '${_visible ? 'Hide' : 'Show'} ${widget.label.toLowerCase()}',
-        onPressed: widget.enabled
-            ? () => setState(() => _visible = !_visible)
-            : null,
-        icon: Icon(
-          _visible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode()..addListener(_handleFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _focusNode
+      ..removeListener(_handleFocusChange)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TextFormField(
+        key: ValueKey(widget.fieldKey),
+        controller: widget.controller,
+        focusNode: _focusNode,
+        enabled: widget.enabled,
+        obscureText: !_visible,
+        autocorrect: false,
+        enableSuggestions: false,
+        enableIMEPersonalizedLearning: false,
+        autofillHints: null,
+        textInputAction: widget.action,
+        autovalidateMode: widget.showRequirements
+            ? AutovalidateMode.onUserInteraction
+            : AutovalidateMode.disabled,
+        validator: widget.validator,
+        onChanged: widget.onChanged,
+        onFieldSubmitted: (_) => widget.onSubmitted?.call(),
+        decoration: InputDecoration(
+          labelText: widget.label,
+          errorMaxLines: 4,
+          suffixIcon: IconButton(
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            tooltip:
+                '${_visible ? 'Hide' : 'Show'} ${widget.label.toLowerCase()}',
+            onPressed: widget.enabled
+                ? () => setState(() => _visible = !_visible)
+                : null,
+            icon: Icon(
+              _visible
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+            ),
+          ),
         ),
+      ),
+      if (widget.showRequirements)
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: widget.controller,
+          builder: (context, value, _) {
+            final visible = _focusNode.hasFocus || value.text.isNotEmpty;
+            final reduceMotion = MediaQuery.disableAnimationsOf(context);
+            return AnimatedSize(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: visible
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: _PasswordRequirementsPanel(
+                        requirements: evaluatePassword(value.text),
+                        reduceMotion: reduceMotion,
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity, height: 0),
+            );
+          },
+        ),
+    ],
+  );
+}
+
+class _PasswordRequirementsPanel extends StatelessWidget {
+  const _PasswordRequirementsPanel({
+    required this.requirements,
+    required this.reduceMotion,
+  });
+
+  final PasswordRequirements requirements;
+  final bool reduceMotion;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.primary;
+    final duration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
+    final checks = <(String, bool)>[
+      ('At least 8 characters', requirements.minimumLength),
+      ('One uppercase letter (A–Z)', requirements.uppercase),
+      ('One lowercase letter (a–z)', requirements.lowercase),
+      ('One number (0–9)', requirements.number),
+      ('One special character', requirements.special),
+    ];
+
+    return Semantics(
+      container: true,
+      label: 'Password requirements. Strength: ${requirements.strength}.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var index = 0; index < checks.length; index++)
+            _PasswordRequirementRow(
+              key: ValueKey('password-rule-$index-${checks[index].$2}'),
+              label: checks[index].$1,
+              met: checks[index].$2,
+              color: color,
+              neutralColor: theme.colorScheme.onSurfaceVariant,
+              duration: duration,
+            ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Password strength',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Text(
+                requirements.strength,
+                key: const ValueKey('password-strength-label'),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Semantics(
+            label:
+                'Password strength ${requirements.completedCount} of 5 requirements',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(
+                  end: requirements.completedCount / checks.length,
+                ),
+                duration: duration,
+                builder: (context, value, _) => LinearProgressIndicator(
+                  value: value,
+                  minHeight: 4,
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  color: color,
+                  semanticsLabel: 'Password strength',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PasswordRequirementRow extends StatelessWidget {
+  const _PasswordRequirementRow({
+    super.key,
+    required this.label,
+    required this.met,
+    required this.color,
+    required this.neutralColor,
+    required this.duration,
+  });
+
+  final String label;
+  final bool met;
+  final Color color;
+  final Color neutralColor;
+  final Duration duration;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: '$label, ${met ? 'met' : 'not met'}',
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 22,
+            height: 24,
+            child: Center(
+              child: AnimatedSwitcher(
+                duration: duration,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: ScaleTransition(scale: animation, child: child),
+                ),
+                child: Icon(
+                  met ? Icons.check_circle_rounded : Icons.circle_outlined,
+                  key: ValueKey(met),
+                  size: 16,
+                  color: met ? color : neutralColor,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: AnimatedDefaultTextStyle(
+              duration: duration,
+              style: Theme.of(context).textTheme.bodySmall!
+                  .copyWith(color: met ? color : neutralColor),
+              child: Text(label),
+            ),
+          ),
+        ],
       ),
     ),
   );
@@ -275,15 +487,12 @@ String? validateAccountEmail(String? value, {required bool localOnly}) {
       : 'Enter a valid email address.';
 }
 
-String? validateNewPassword(String? value) => (value?.length ?? 0) < 16
-    ? 'Use at least 16 characters for your password.'
-    : null;
-
 Widget authEmailField(
   TextEditingController controller, {
   required String fieldKey,
   bool localOnly = true,
   bool enabled = true,
+  ValueChanged<String>? onChanged,
   TextInputAction action = TextInputAction.next,
   VoidCallback? onSubmitted,
 }) => TextFormField(
@@ -292,10 +501,12 @@ Widget authEmailField(
   enabled: enabled,
   keyboardType: TextInputType.emailAddress,
   textInputAction: action,
+  autovalidateMode: AutovalidateMode.onUserInteraction,
   autocorrect: false,
   enableSuggestions: false,
   autofillHints: null,
   enableIMEPersonalizedLearning: false,
+  onChanged: onChanged,
   validator: (value) => validateAccountEmail(value, localOnly: localOnly),
   onFieldSubmitted: (_) => onSubmitted?.call(),
   decoration: const InputDecoration(

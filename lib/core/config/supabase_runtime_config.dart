@@ -37,6 +37,7 @@ class SupabaseRuntimeConfig {
       defaultValue: 'development',
     ),
     String url = const String.fromEnvironment('SUPABASE_URL'),
+    String projectRef = const String.fromEnvironment('SUPABASE_PROJECT_REF'),
     String publishableKey = const String.fromEnvironment(
       'SUPABASE_PUBLISHABLE_KEY',
     ),
@@ -53,6 +54,7 @@ class SupabaseRuntimeConfig {
     return parseHosted(
       environment: parsedEnvironment,
       url: url,
+      projectRef: projectRef,
       publishableKey: publishableKey.isNotEmpty
           ? publishableKey
           : legacyAnonKey,
@@ -72,13 +74,16 @@ class SupabaseRuntimeConfig {
   static SupabaseRuntimeConfig? parseHosted({
     required BackendEnvironment environment,
     required String url,
+    required String projectRef,
     required String publishableKey,
     required String webBaseUrl,
   }) {
     if (environment == BackendEnvironment.development) return null;
     final endpoint = Uri.tryParse(url.trim());
     final app = Uri.tryParse(webBaseUrl.trim());
-    if (!_validHostedOrigin(endpoint) ||
+    if (!_validProjectRef(projectRef) ||
+        !_matchesProjectRef(endpoint, projectRef) ||
+        !_validHostedOrigin(endpoint) ||
         !_validHostedOrigin(app) ||
         !_validClientKey(publishableKey)) {
       return null;
@@ -90,6 +95,13 @@ class SupabaseRuntimeConfig {
       webBaseUrl: app!,
     );
   }
+
+  static bool _validProjectRef(String value) =>
+      RegExp(r'^[a-z0-9]{20}$').hasMatch(value);
+
+  static bool _matchesProjectRef(Uri? endpoint, String projectRef) =>
+      endpoint != null &&
+      endpoint.host.toLowerCase() == '$projectRef.supabase.co';
 
   static bool _validHostedOrigin(Uri? value) {
     if (value == null ||

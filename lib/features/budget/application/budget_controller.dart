@@ -144,10 +144,27 @@ class BudgetController extends Notifier<BudgetState> {
     success: 'Expense deleted.',
   );
 
-  Future<bool> saveRecurringRule(Map<String, dynamic> values) => _mutate(
-    (repo, couple, _) => repo.saveRecurringRule(couple, values),
+  Future<bool> saveRecurringRule(
+    Map<String, dynamic> values, {
+    String? ruleId,
+    int? expectedRevision,
+  }) => _mutate(
+    (repo, couple, _) => repo.saveRecurringRule(
+      couple,
+      values,
+      ruleId: ruleId,
+      expectedRevision: expectedRevision,
+    ),
     success: 'Recurring expense saved.',
   );
+
+  Future<bool> setRecurringRuleActive(RecurringExpenseRule rule, bool active) =>
+      _mutate(
+        (repo, couple, _) => repo.setRecurringRuleActive(couple, rule, active),
+        success: active
+            ? 'Recurring schedule resumed.'
+            : 'Recurring schedule paused.',
+      );
 
   Future<bool> recordRecurring(RecurringExpenseRule rule, DateTime date) {
     final budget = state.snapshot?.budget;
@@ -194,6 +211,16 @@ class BudgetController extends Notifier<BudgetState> {
         notice: success,
       );
       return true;
+    } on BudgetOperationFailure catch (error) {
+      if (state.coupleId == coupleId) {
+        state = BudgetState(
+          coupleId: coupleId,
+          month: month,
+          snapshot: state.snapshot,
+          error: error.message,
+        );
+      }
+      return false;
     } catch (_) {
       if (state.coupleId == coupleId) {
         state = BudgetState(

@@ -26,6 +26,8 @@ class BrandColors extends ThemeExtension<BrandColors> {
     required this.border,
     required this.heroStart,
     required this.heroEnd,
+    this.heroBegin = Alignment.topLeft,
+    this.heroFinish = Alignment.bottomRight,
   });
   final Color primary;
   final Color secondary;
@@ -36,6 +38,8 @@ class BrandColors extends ThemeExtension<BrandColors> {
   final Color border;
   final Color heroStart;
   final Color heroEnd;
+  final AlignmentGeometry heroBegin;
+  final AlignmentGeometry heroFinish;
 
   static BrandColors of(BuildContext context) =>
       Theme.of(context).extension<BrandColors>()!;
@@ -51,6 +55,8 @@ class BrandColors extends ThemeExtension<BrandColors> {
     Color? border,
     Color? heroStart,
     Color? heroEnd,
+    AlignmentGeometry? heroBegin,
+    AlignmentGeometry? heroFinish,
   }) => BrandColors(
     primary: primary ?? this.primary,
     secondary: secondary ?? this.secondary,
@@ -61,6 +67,8 @@ class BrandColors extends ThemeExtension<BrandColors> {
     border: border ?? this.border,
     heroStart: heroStart ?? this.heroStart,
     heroEnd: heroEnd ?? this.heroEnd,
+    heroBegin: heroBegin ?? this.heroBegin,
+    heroFinish: heroFinish ?? this.heroFinish,
   );
 
   @override
@@ -76,6 +84,8 @@ class BrandColors extends ThemeExtension<BrandColors> {
       border: Color.lerp(border, other.border, t)!,
       heroStart: Color.lerp(heroStart, other.heroStart, t)!,
       heroEnd: Color.lerp(heroEnd, other.heroEnd, t)!,
+      heroBegin: AlignmentGeometry.lerp(heroBegin, other.heroBegin, t)!,
+      heroFinish: AlignmentGeometry.lerp(heroFinish, other.heroFinish, t)!,
     );
   }
 }

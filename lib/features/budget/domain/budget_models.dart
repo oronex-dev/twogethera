@@ -281,6 +281,117 @@ class RecurringExpenseRule {
   final bool active;
   final int revision;
 
+  /// Returns scheduled local calendar dates in the requested date-only range.
+  /// Monthly and yearly occurrences stay anchored to [startsOn]. When a month
+  /// has no anchor day, the last day of that month is used. Dates are handled
+  /// as calendar dates, not elapsed 24-hour periods, so DST cannot shift them.
+  List<DateTime> occurrencesBetween(DateTime first, DateTime last) {
+    final start = DateTime.utc(startsOn.year, startsOn.month, startsOn.day);
+    final lower = DateTime.utc(first.year, first.month, first.day);
+    final upper = DateTime.utc(last.year, last.month, last.day);
+    if (upper.isBefore(lower) || upper.isBefore(start)) return const [];
+    final result = <DateTime>[];
+    var occurrence = start;
+    switch (frequency) {
+      case 'weekly':
+        final days = lower.difference(start).inDays;
+        final weeks = days <= 0 ? 0 : days ~/ 7;
+        occurrence = start.add(Duration(days: weeks * 7));
+        while (occurrence.isBefore(lower)) {
+          occurrence = occurrence.add(const Duration(days: 7));
+        }
+      case 'monthly':
+        final months =
+            (lower.year - start.year) * 12 + lower.month - start.month;
+        occurrence = _monthlyOccurrence(start, months < 0 ? 0 : months);
+        while (occurrence.isBefore(lower)) {
+          occurrence = _monthlyOccurrence(
+            start,
+            _monthOffset(start, occurrence) + 1,
+          );
+        }
+      case 'yearly':
+        final years = lower.year - start.year;
+        occurrence = _yearlyOccurrence(start, years < 0 ? 0 : years);
+        while (occurrence.isBefore(lower)) {
+          occurrence = _yearlyOccurrence(
+            start,
+            occurrence.year - start.year + 1,
+          );
+        }
+      default:
+        return const [];
+    }
+    final finalDate = endsOn == null
+        ? upper
+        : DateTime.utc(endsOn!.year, endsOn!.month, endsOn!.day).isBefore(upper)
+        ? DateTime.utc(endsOn!.year, endsOn!.month, endsOn!.day)
+        : upper;
+    while (!occurrence.isAfter(finalDate)) {
+      result.add(DateTime(occurrence.year, occurrence.month, occurrence.day));
+      occurrence = switch (frequency) {
+        'weekly' => occurrence.add(const Duration(days: 7)),
+        'monthly' => _monthlyOccurrence(
+          start,
+          _monthOffset(start, occurrence) + 1,
+        ),
+        'yearly' => _yearlyOccurrence(start, occurrence.year - start.year + 1),
+        _ => occurrence,
+      };
+    }
+    return List.unmodifiable(result);
+  }
+
+  DateTime? nextUnrecordedOccurrence(Iterable<DateTime> recorded) {
+    final known = recorded
+        .map((date) => DateTime.utc(date.year, date.month, date.day))
+        .toSet();
+    var occurrence = DateTime.utc(startsOn.year, startsOn.month, startsOn.day);
+    if (endsOn != null && endsOn!.isBefore(startsOn)) return null;
+    for (var count = 0; count < 20000; count++) {
+      if (endsOn != null &&
+          occurrence.isAfter(
+            DateTime.utc(endsOn!.year, endsOn!.month, endsOn!.day),
+          )) {
+        return null;
+      }
+      if (!known.contains(occurrence)) {
+        return DateTime(occurrence.year, occurrence.month, occurrence.day);
+      }
+      final start = DateTime.utc(startsOn.year, startsOn.month, startsOn.day);
+      if (frequency == 'weekly') {
+        occurrence = occurrence.add(const Duration(days: 7));
+      } else if (frequency == 'monthly') {
+        occurrence = _monthlyOccurrence(
+          start,
+          _monthOffset(start, occurrence) + 1,
+        );
+      } else if (frequency == 'yearly') {
+        occurrence = _yearlyOccurrence(start, occurrence.year - start.year + 1);
+      } else {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  static int _monthOffset(DateTime start, DateTime value) =>
+      (value.year - start.year) * 12 + value.month - start.month;
+
+  static DateTime _monthlyOccurrence(DateTime start, int monthOffset) {
+    final monthIndex = start.year * 12 + start.month - 1 + monthOffset;
+    final year = monthIndex ~/ 12;
+    final month = monthIndex % 12 + 1;
+    final lastDay = DateTime.utc(year, month + 1, 0).day;
+    return DateTime.utc(year, month, start.day.clamp(1, lastDay));
+  }
+
+  static DateTime _yearlyOccurrence(DateTime start, int yearOffset) {
+    final year = start.year + yearOffset;
+    final lastDay = DateTime.utc(year, start.month + 1, 0).day;
+    return DateTime.utc(year, start.month, start.day.clamp(1, lastDay));
+  }
+
   factory RecurringExpenseRule.fromJson(Map<String, dynamic> json) {
     final currency = CurrencyUnit.byCode(json['currency_code']);
     if (currency == null ||
@@ -318,14 +429,52 @@ class BudgetSnapshot {
     required this.expenses,
     required this.recurringRules,
     required this.members,
+    this.recurringOccurrences = const [],
   });
   final CoupleBudget? budget;
   final List<CoupleExpense> expenses;
   final List<RecurringExpenseRule> recurringRules;
   final List<BudgetMember> members;
+  final List<RecurringExpenseOccurrence> recurringOccurrences;
 
   int get totalSpent => expenses.fold(0, (sum, item) => sum + item.amountMinor);
   int get remaining => (budget?.limitMinor ?? 0) - totalSpent;
+}
+
+class BudgetOperationFailure implements Exception {
+  const BudgetOperationFailure(this.message);
+  final String message;
+
+  static BudgetOperationFailure fromPostgresCode(
+    String? code, {
+    bool duplicateOccurrence = false,
+  }) => switch (code) {
+    '23505' when duplicateOccurrence => const BudgetOperationFailure(
+      'This occurrence has already been recorded.',
+    ),
+    '23505' => const BudgetOperationFailure(
+      'That entry already exists. Refresh the budget and try again.',
+    ),
+    '23514' => const BudgetOperationFailure(
+      'Check the amount, currency, date, and split details, then try again.',
+    ),
+    '42501' => const BudgetOperationFailure(
+      'Shared budget access is unavailable. Confirm that your couple is still linked.',
+    ),
+    '23503' => const BudgetOperationFailure(
+      'The related budget or schedule changed. Refresh and try again.',
+    ),
+    _ => const BudgetOperationFailure(
+      'We could not save that change. Check your connection and retry.',
+    ),
+  };
+}
+
+@immutable
+class RecurringExpenseOccurrence {
+  const RecurringExpenseOccurrence({required this.ruleId, required this.date});
+  final String ruleId;
+  final DateTime date;
 }
 
 @immutable
@@ -378,7 +527,17 @@ abstract interface class BudgetRepository {
     int? expectedRevision,
   });
   Future<void> deleteExpense(String coupleId, CoupleExpense expense);
-  Future<void> saveRecurringRule(String coupleId, Map<String, dynamic> values);
+  Future<void> saveRecurringRule(
+    String coupleId,
+    Map<String, dynamic> values, {
+    String? ruleId,
+    int? expectedRevision,
+  });
+  Future<void> setRecurringRuleActive(
+    String coupleId,
+    RecurringExpenseRule rule,
+    bool active,
+  );
   Future<void> recordRecurringOccurrence(
     String coupleId,
     String budgetId,

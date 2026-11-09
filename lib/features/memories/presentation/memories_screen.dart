@@ -9,6 +9,7 @@ import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
 import '../../authentication/application/auth_controller.dart';
+import '../../authentication/domain/auth_repository.dart';
 import '../application/memories_controller.dart';
 import '../domain/memory_models.dart';
 
@@ -220,27 +221,71 @@ class _MemoriesScreenState extends ConsumerState<MemoriesScreen> {
   }
 
   Future<void> _deleteMemory(CoupleMemory memory) async {
-    final accepted = await showDialog<bool>(
+    final action = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Remove this memory?'),
         content: const Text(
-          'The memory and its attached photos will be removed from the shared journal.',
+          'Ordinary removal is recoverable by either active partner for seven days. Privacy removal hides the memory and attached photos immediately, cannot be undone, and queues primary-copy cleanup with a 24-hour target.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context, 'cancel'),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context, 'privacy'),
+            child: const Text('Remove for privacy'),
+          ),
+          if (memory.caption.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'field:caption'),
+              child: const Text('Remove caption only'),
+            ),
+          if (memory.personalNotes.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'field:personal_notes'),
+              child: const Text('Remove shared notes only'),
+            ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(context, 'ordinary'),
+            child: const Text('Remove for 7 days'),
           ),
         ],
       ),
     );
-    if (accepted == true && mounted) {
+    if (action == 'ordinary' && mounted) {
       await ref.read(memoriesControllerProvider.notifier).delete(memory);
+    } else if ((action == 'privacy' || action?.startsWith('field:') == true) &&
+        mounted) {
+      final repository = ref.read(authRepositoryProvider);
+      try {
+        if (repository is! PrivacyRemovalRepository) {
+          throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+        }
+        await (repository as PrivacyRemovalRepository).requestPrivacyRemoval(
+          table: 'couple_memories',
+          recordId: memory.id,
+          field: action == 'privacy' ? null : action!.substring(6),
+          removeRecord: action == 'privacy',
+        );
+        await ref
+            .read(memoriesControllerProvider.notifier)
+            .load(memory.coupleId);
+        if (mounted) {
+          _showMessage(
+            action == 'privacy'
+                ? 'Memory hidden; removal cleanup is queued.'
+                : 'The selected shared text was removed.',
+          );
+        }
+      } on AuthFailure catch (error) {
+        if (mounted) _showMessage(error.message);
+      } catch (_) {
+        if (mounted) {
+          _showMessage('The privacy request could not be submitted.');
+        }
+      }
     }
   }
 

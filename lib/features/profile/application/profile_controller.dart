@@ -6,6 +6,10 @@ import '../../authentication/application/auth_controller.dart';
 import '../../authentication/domain/auth_repository.dart';
 import '../domain/profile_repository.dart';
 
+/// Kept disabled until the private Storage upload, reload, and cleanup path has
+/// passed the Private Beta V1 verification gate.
+const profilePhotosEnabledInPrivateBeta = false;
+
 final profileRepositoryProvider = Provider<ProfileRepository>((ref) {
   final repository = ref.watch(authRepositoryProvider);
   if (repository is ProfileRepository) return repository as ProfileRepository;
@@ -122,7 +126,7 @@ class ProfileController extends Notifier<ProfileState> {
       );
 
       Uint8List? myAvatar;
-      if (profile.avatarPath != null) {
+      if (profilePhotosEnabledInPrivateBeta && profile.avatarPath != null) {
         try {
           myAvatar = await repository.downloadAvatar(profile.avatarPath!);
         } catch (_) {
@@ -144,7 +148,8 @@ class ProfileController extends Notifier<ProfileState> {
       if (paired) {
         try {
           partner = await repository.loadPartnerProfile();
-          if (partner?.avatarPath != null) {
+          if (profilePhotosEnabledInPrivateBeta &&
+              partner?.avatarPath != null) {
             try {
               partnerAvatar = await repository.downloadAvatar(
                 partner!.avatarPath!,
@@ -233,6 +238,7 @@ class ProfileController extends Notifier<ProfileState> {
   }
 
   Future<bool> updateAvatar(Uint8List bytes) async {
+    if (!profilePhotosEnabledInPrivateBeta) return false;
     final userId = state.userId;
     final current = state.myProfile;
     if (userId == null || current == null || state.photoBusy) return false;
@@ -279,6 +285,7 @@ class ProfileController extends Notifier<ProfileState> {
   }
 
   Future<bool> removeAvatar() async {
+    if (!profilePhotosEnabledInPrivateBeta) return false;
     final userId = state.userId;
     final current = state.myProfile;
     final path = current?.avatarPath ?? state.pendingAvatarRemovalPath;

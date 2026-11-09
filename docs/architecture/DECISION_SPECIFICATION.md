@@ -1,10 +1,149 @@
-# Consolidated architecture decision specification · CP-003B final resolution
+# Consolidated architecture decision specification · Private Beta V1
 
-**Documentation reconciliation only; no implementation authorization.** This is the single current decision specification. It supersedes incompatible *recommendations* in [FINAL_DECISION_PROPOSALS.md](FINAL_DECISION_PROPOSALS.md), the CP-002 blueprint and the historical review. It preserves the existing D01/D02 approvals and [D03’s recorded revision](D01_D03_RESOLUTION.md). D06 and D09 were formally approved in CP-006 on 2 November 2026; this update records those exact policy boundaries without approving unrelated implementation details. Earlier records are retained as history.
+**Current policy record — Private Beta V1, 8 November 2026.** This addendum records the user's approved product-policy scope for a controlled beta with exactly two existing partner accounts. Policy approval is not proof that the software, provider, cleanup jobs, backups, or restore process satisfy the policy. Numerical values below are **approved targets**, not guaranteed deadlines until verified end to end.
 
-Status meanings: **already approved** applies to D01, D02, D06 and D09 (D02 retains its safeguards). **technically endorsed pending formal approval** records the user's direction and security/testing/disclosure conditions without approving unresolved mechanisms or numerical defaults. **unresolved** covers D03's incomplete implementation package and revised P03/P04/P09 choices. No unapproved policy value is an executable default. Formal policy approval is not migration, Auth, Supabase, dependency or commit permission.
+The beta includes Bucket List, Important Dates, Plans/itineraries, Budget/expenses, recurring expenses, appearance/personalization, and profile management. Profile photos remain disabled until their complete private-storage verification gate passes. Savings, notifications, offline sync, self-service unified export, public registration, unrestricted invitations/onboarding, multi-couple rollout, and survivor archive UI are deferred. No E2EE claim is permitted.
 
-## Complete decision matrix
+## Approved Private Beta V1 policies
+
+| Area | Approved policy | Technical status / limit |
+| --- | --- | --- |
+| Couple and beta access (D01, D02, D06, D09) | Exactly the two existing partner accounts; no public registration or unrestricted onboarding. Closure/unlink revokes both partners immediately, creates no survivor archive, and never reuses the archived space; a later new space is subject to the two-account gate. Downloaded copies cannot be remotely erased. | Additive migration 028 enforces a two-user allowlist and close transaction. Account UI and server RPC are implemented locally. The local allowlist contains only the two existing synthetic beta identities; hosted identity enrollment remains a controlled operator action. |
+| Shared data and nonfinancial retention (D03/P03) | Purge shared nonfinancial primary copies within a **30-day target** after immutable couple closure. Both users lose server access immediately. | Migration 028 creates manifest-backed purge jobs; Edge maintenance worker exists but is not scheduled or provider-verified. The target is not guaranteed until hosted scheduling, failure alerts, Storage cleanup and restore behavior pass. |
+| Financial audit (P01/P02/P09) | Retain only the approved minimized allowlist for **90 days from immutable couple closure**, attributed by random per-couple aliases. Exclude splits, payer aliases, direct identifiers, text, receipts, recurrence, and unnecessary timestamps. Former partners cannot read audit rows. | Migration 028 captures prospective expense events in a private append-only projection; migrations 030/031 add currency and retry guards. No direct API-role access. The purge worker is implemented but unscheduled. Existing pre-migration rows are not backfilled; historical edits cannot be reconstructed. |
+| Ordinary deletion and privacy removal (P04) | Ordinary shared-text delete hides immediately and either currently paired partner may restore within **7 days**. Privacy removal hides immediately, cannot be restored, and has a **24-hour primary-copy purge target**; preserve safe separated content, otherwise remove the smallest shared record for both. | Migrations 028/030 implement tombstones, privacy blocks and cleanup jobs. Migration 030 exposes recovery metadata and corrects goal-child job cancellation. Account, planner, budget and memory UI expose privacy removal; the purge worker is not scheduled or failure-alerted. |
+| Account deletion/recovery (P07/D10) | Deletion irreversibly closes the whole couple, immediately denies both partners, has no archive and no account recovery. Starts 30-day nonfinancial and 90-day minimized-audit targets. Reauthentication required; former downloads cannot be erased remotely. | Migration 028 and `delete-account` Edge Function implement close-first, retryable Auth deletion; migration 029 lets maintenance claim due retries. UI requires typing DELETE and signs out on 200/202. End-to-end managed Auth deletion and worker retry are not verified. |
+| Backups and restore (P08/D04) | A **30-day maximum backup target** is conditional on provider support. Restores must replay deletion/privacy state before any API access. | No provider backup-retention or restore gate/replay mechanism is configured or verified. This remains a release blocker; application code cannot prove or enforce provider snapshots. |
+| Profile photos (D07) | Private authenticated access only. Keep profile photo functions disabled until full authorization, upload/reload, revocation, and object/derivative cleanup tests pass. | Flutter controls are disabled and migration 028 adds restrictive denial; existing objects were not deleted. Re-enable only after actual managed Storage round trip and cleanup-failure tests. |
+| Export (P06) | No self-service export. Support-assisted export is unavailable until a real contact, named operators, identity verification, and encrypted delivery/expiry/deletion workflow are configured and tested. | No endpoint is advertised or enabled. Existing proposal below is a runbook design only, not an available service. |
+| Offline and web session (D04/D08) | No offline synchronization or durable sensitive browser storage. Web users sign in again after refresh/close; unsynced changes may be lost. No E2EE claim. | Auth remains memory-only; web build removes Flutter's offline worker and bootstrap clears old service workers/cache. Automated checks exist; deployed browser verification is still required. |
+| Deferred features (D05 and beta scope) | Savings Tracker, notifications/token collection, offline sync, self-service unified export, public signup/unrestricted onboarding, multi-couple rollout, and survivor archive UI are out of V1. Future notifications must be opt-in with generic lock-screen content. | Do not expose or enable deferred entry points/services in the beta. Existing Budget/expense functionality remains in scope and keeps exact minor-unit money semantics. |
+| Recurrence (D11) | Date-only annual dates remain civil dates. Monthly recurrence clamps to the last valid day; Feb. 29 recurs on Feb. 28 in non-leap years. Timed plans store an instant and explicit IANA timezone. DST scheduling, external calendar integration, and RRULE support are deferred. | Existing expense recurrence clamps dates; timed-plan schema/runtime timezone handling and Important Dates parity require verification. |
+| Legal documents | Privacy Policy and Terms remain drafts until counsel/product review and approval. Do not claim legal compliance. | In-app documents remain marked drafts. Responsible entity, contact, jurisdiction, and final lifecycle disclosure must be supplied before the two partner accounts use real personal data. |
+
+### Approved targets are not guarantees
+
+The 30-day nonfinancial purge after closure, 90-day minimized financial audit retention, 7-day ordinary recovery, 24-hour primary purge after privacy removal, and conditional 30-day maximum backup target are approved policy targets, not guaranteed deadlines. Account recovery is explicitly not offered in V1. Previously downloaded or in-flight bytes remain outside reliable remote erasure.
+
+### Approved financial audit field mapping and implementation status
+
+The user approved the exact retained-field allowlist below. The source is `couple_expenses` in `supabase/migrations/20261102000900_shared_budget_expenses.sql`; relevant row triggers are in migrations 011 and 028. Existing source columns are `id`, `couple_id`, `budget_id`, `title`, `description`, `amount_minor`, `currency_code`, `currency_exponent`, `occurred_on`, `category_key`, `paid_by_user`, `split_mode`, `split_a_user_id`, `split_a_minor`, `split_b_user_id`, `split_b_minor`, `recurring_rule_id`, `recurrence_key`, `receipt_count`, `created_by`, `updated_by`, `created_at`, `updated_at`, and `revision`. Existing rows do not contain a financial event history.
+
+| Audit field | Existing source column | Transformation | Purpose | Privacy risk |
+| --- | --- | --- | --- | --- |
+| `audit_event_id` | None | New random UUID, never derived from an expense ID | Identify one immutable audit event | Low; random identifier still permits event-level linkage |
+| `opaque_couple_ref` | `couple_id` only as an in-transaction input | New random per-couple UUID; source mapping removed at closure | Group events for the fixed retention window | Low-to-moderate; events correlate within one couple |
+| `event_type` | Operation context | Fixed enum: `recorded`, `corrected`, `reversed` | Explain the financial event action | Low; no user-supplied text |
+| `actor_alias` | Verified `auth.uid()` at the event | Random alias scoped to couple; identity map is private and deleted at closure | Attribute a new event without a retained account ID | Moderate; events link to the same pseudonym within this couple |
+| `amount_minor` | `amount_minor` | Signed integer: positive record, signed amount delta for correction, negative amount for reversal | Preserve exact amount facts | Moderate; amount can reveal behavior |
+| `currency_code`, `currency_exponent` | Same-named source columns | Copy validated ISO code and exponent; source currency cannot change after record | Interpret integer amounts exactly | Low-to-moderate; may contribute to inference |
+| `effective_date` | `occurred_on` | Copy civil date; no timestamp conversion | Preserve date-level financial context | Moderate; dates can reveal routines |
+| `event_sequence` | None | Monotonic generated sequence within the opaque couple scope | Deterministic event order | Low; reveals relative order only |
+| `schema_version` | None | Generated constant `1` | Interpret the stable projection format | Low |
+| `correction_reference` | None | Nullable FK to the prior generated `audit_event_id` only | Relate a signed correction/reversal to the previous retained event | Low-to-moderate; reveals a financial event relationship |
+
+The implementation uses `app_private.financial_audit_events`, a private append-only table with no authenticated/API role read access. Trigger capture is prospective; it does not invent or backfill pre-migration history. The current `couple_expenses` schema cannot reconstruct previous amounts, editor history, or the time of earlier edits. Thus only events captured after the audit trigger is installed are represented; this is not a complete audit of earlier row history. The audit purge deadline is anchored to immutable server `couple_spaces.closed_at + 90 days`. The cleanup worker is written but no scheduler/alerting is configured, so physical expiry is not currently guaranteed.
+
+Explicit exclusions: split amounts, split participant aliases, payer aliases, `id`, direct user/account IDs, email, profile data, `title`, `description`, receipts/object paths, recurrence references, `category_key`, budget links/limits, `split_mode`, `receipt_count`, `created_at`, `updated_at`, `revision`, and all unnecessary metadata. `created_by`, `updated_by`, `paid_by_user`, split-user IDs, and source `id` are not retained; source identifiers are not hashed. Currency unit changes are rejected after an expense is recorded so a signed correction never subtracts values expressed in different units.
+
+Correction/idempotency design: a correction appends a new immutable signed delta referring only to the preceding generated audit event ID. A reversal appends the negative amount and generated reference. A private live-only `financial_audit_heads` mapping supports source-row deduplication while the couple is active and is deleted with the private couple scope at closure; it is not part of retained events. Database transaction and row triggers ensure retries of a source mutation do not append a duplicate event. The initial closure operation is idempotent and returns the same immutable closure timestamp on retry.
+
+Retention clock: starts at the first server-set `closed_at`; it cannot be reset by retry, account deletion, or restore. `purge_expired_financial_audit()` is service-role-only and removes all events at or after `closed_at + 90 days`. Provider backups can retain inaccessible bytes longer; the provider's backup aging, restore replay, and purge behavior remain unverified. No statutory retention rule is inferred.
+
+**Approved policy; implemented locally; not yet fully verified.** Exact audit field list, correction rule, no-split/no-payer choice, and 90-day-after-closure period are approved. Local managed-role/API, closure, mutation capture, and purge-boundary proofs still need to pass; historic event gaps remain an explicit limitation.
+
+### Approved privacy-removal policy and implementation requirements
+
+The policy is approved: privacy removal is distinct from ordinary deletion; separable personal information is removed or redacted while safe shared records are preserved. If content is inseparable, remove the smallest affected record for both partners. After an authorized request, hide the affected content immediately, never restore it, and target primary-copy purge within 24 hours. Financial records may retain only the separately approved minimized audit information, subject to legal review. Operational logs contain only content-free processing metadata. These are policy targets, not verified technical guarantees; backups and previously downloaded copies are not represented as remotely erased.
+
+| Data category | Proposed behavior | What remains / boundary |
+| --- | --- | --- |
+| Private profile fields and personal appearance preferences | Owner may request removal/reset; immediately blank or block the affected field and revoke its media pointer. Require current identity; recent reauthentication for broad account-level removal. | Remove only that user's profile/preferences. Do not affect the partner's private profile or theme. |
+| A user's authored text in a shared memory, plan/task, note, or other shared prose | Remove/redact the eligible personal contribution when it is safely separable. If it is inseparable, immediately hide then remove the smallest affected record for both partners. | Never retain removed free text for audit; no restore. Preserve other safe records. |
+| Shared photos and attachments depicting or identifying a requester | Immediately revoke pointers and deny reads; remove the smallest affected attachment for both partners if the image/content is inseparable. Purge original and known derivatives. | No restore. Storage, cache, derivative, and backup cleanup remain unverified. Photo flows remain disabled until their verification gate passes. |
+| Budget and expense prose / receipts | Hide and remove affected text and receipt objects; invalidate access paths and purge Storage objects/known derivatives. | Receipt images/paths are excluded from financial audit. Do not retain notes/descriptions for audit. |
+| Financial facts (amount, currency, date, correction integrity) | Do not silently rewrite shared financial facts as part of prose removal. Retain only the user-approved minimized audit allowlist, subject to legal review. | The policy/field allowlist is approved; local capture and purge behavior still require verification. No legal hold is inferred. |
+| Shared structured facts (date, location, category, checklist/status, goal/milestone state) | Remove/redact separable personal information while preserving safe shared records. If inseparable, immediately hide and remove the smallest affected record for both partners. | No restore; avoid changing unrelated records or corrupting safe shared history. |
+| Operational request metadata | Retain only opaque request/target reference, fixed reason code, processing state, and timestamps needed for execution/retry. | Content-free metadata only. Exact operational log retention and access controls remain implementation details to define and test. |
+
+The policy approval is not legal advice. Counsel must assess applicable rights and any narrow mandatory financial-record requirements in the actual jurisdiction; no such obligation or compliance status is assumed here.
+
+### Support-assisted export — operational proposal awaiting approval
+
+1. **Request:** The user requests an export through a support contact/channel configured by the owner. No email address or channel is implied by this specification. Record only a request ID, requesting account reference, requested scope, status, and timestamps.
+2. **Verify identity and access:** Require the user to authenticate in the app and confirm through a separately verified channel configured for the beta. Support checks current account status and current membership at request acceptance, export generation, and delivery. A closed/unlinked or deletion-pending account receives no shared-space export. Support does not use partner credentials or impersonate either user.
+3. **Scope and contents:** Export only the requester's own private profile/preferences and the shared records they are currently authorized to read: Bucket List, Important Dates, Plans/tasks, and active shared budget/expense data. Exclude the partner's private profile/preferences and account identifiers, internal security metadata, invitation secrets, session/token data, privacy-removed content, closed-space archives, and the post-closure financial audit projection. Exclude profile/receipt media until the private-media workflow is verified and specifically approved for export. Use a documented versioned format and minimize fields to the current user-facing data needed.
+4. **Generate and deliver:** Generate in a restricted worker with least privilege and no broad service key in client code. Encrypt the temporary artifact at rest; deliver only through a short-lived, single-recipient authenticated download or another secure method explicitly configured by the owner. Recheck access immediately before making it available. Do not put export links or contents in ordinary email or application logs.
+5. **Expire and delete:** Proposed default is a 24-hour download window, one successful download, and automatic deletion of the temporary artifact and working copies at expiry or after download. This duration and delivery method require approval and a test proving deletion; until then, support export is not an available beta promise.
+6. **Support controls:** Restrict the operation to named, individually authenticated support operators with least-privilege, time-bounded access and an auditable approval/action record. Log operator identity, request ID, scope code, timestamps, and outcome only—not export contents or unnecessary personal narrative. Review access logs periodically and revoke operator access when no longer needed.
+
+**Approval required:** Configure the contact channel, verify method, response expectation, artifact format, download window, operator list, and operational-log retention. The proposal does not grant support access to former-partner data or authorize a survivor archive.
+
+### Privacy-removal verification and implementation requirements
+
+1. Require a current authenticated identity. The server derives `auth.uid()` and checks the account gate and applicable current ownership/membership; a client-supplied user ID or ownership flag never establishes authority. Do not require partner consent for a request to remove the requesting person's own eligible personal information.
+2. Require explicit confirmation of the exact content unit(s) and removal class. For account deletion or a broad/irreversible request, require recent reauthentication. A narrow removal of the requester's own profile field can use a valid session plus confirmation; a former member uses a verified support channel without regaining couple access.
+3. Commit an idempotent request ID, target opaque IDs, policy reason code, server timestamp, and privacy-generation/block marker in one transaction. Do not copy the removed text, image, token, or request narrative into the job/audit log. Rate-limit by account and operation class; retries return the same request outcome and do not reset deadlines.
+4. Immediately deny reads for the affected content unit across RLS, RPC, search, activity, Storage paths, signed/cache routes, export, and stale sync snapshots. Queue purge of primary and derived copies, retry failures, and alert on missed targets. Keep only restricted operational evidence (request ID, scope, status/timestamps, non-content reason code) for a separately approved operational retention period.
+5. For shared content containing both partners' information, redact the requester's eligible information where safe. If the affected unit is inseparable, immediately hide and remove the smallest affected record for both partners; never quarantine it for later restoration. Financial facts follow only the separately approved audit allowlist; do not retain text or silently rewrite financial history to satisfy a text request.
+
+**Tests required:** owner and former-member request paths; unrelated-account denial; client-ID spoofing; no partner-consent dependency for eligible own data; request enumeration resistance; idempotent retry; rate limits; immediate cross-surface block; ordinary-restore race loses to privacy removal; cleanup retry/alert; no removed content in operational logs; financial projection remains exact while excluded personal fields disappear.
+
+**Legal question, not inferred here:** whether any specific financial record must be retained under the applicable jurisdiction. Obtain jurisdiction-specific review; do not create a legal hold by assumption.
+
+### Approved account-deletion policy and implementation status
+
+Account deletion is irreversible in Private Beta V1. It closes the entire couple space, immediately denies both members, creates no archive, and does not offer private-account recovery. Reauthentication is required; previously downloaded or in-flight copies cannot be remotely erased. No membership or shared content is restored.
+
+1. Reauthenticate and submit an idempotent deletion request. In a transaction, mark the account deletion-pending in the authoritative account gate, deny new operations immediately, revoke refresh/device sessions, and invalidate pending commands/exports. Existing access JWTs must fail the account-state check; token revocation alone is insufficient.
+2. If the account is an active member, atomically close/unlink the couple using the no-archive V1 rule. Both partners immediately lose shared server access; the remaining partner does not become an archive reader. Set one immutable server `closed_at` used for the 30-day nonfinancial purge target and 90-day financial audit clock. Existing privacy-removal blocks are never cleared.
+3. Process Auth identity deletion only after the shared-space close and private-data deletion request have committed. A failed external Auth deletion remains inaccessible and retryable; it must never reopen the account or couple.
+4. Remove the active identity-to-alias mapping at closure, finish nonfinancial primary cleanup by the 30-day target, and retain only the allowlisted inaccessible audit projection until its 90-day expiry. Earlier privacy-removal deadlines always win.
+5. Store deletion/revocation replay state outside the snapshot being restored, or otherwise prove it survives restoration of an older snapshot. Before restored services/API traffic are enabled, replay it, enforce current account/membership/privacy epochs, suppress blocked content, and run a post-restore verification. A rolling 30-day backup window may leave inaccessible residual bytes beyond primary purge; provider behavior and the user-facing residual-copy disclosure must be verified.
+
+**Tests required:** request versus concurrent write/unlink; both partners denied after closure with old JWTs; repeated closure/deletion operations; deletion cannot restore membership/content; privacy removal survives restore; correct 30-/90-day clocks are not reset by retries; Auth deletion ordering; account IDs/notes absent from retained audit; restore gate fails closed when replay is unavailable.
+
+### Policy-to-implementation assessment
+
+**Current Private Beta V1 status (controlling; supersedes this historical assessment where it differs):**
+
+| Status | Policy areas | Evidence and limit |
+| --- | --- | --- |
+| Previously verified locally, bounded proof | D01/D06/D09 membership and invitations; paired-only planner/financial RLS; integer minor-unit money; appearance owner isolation; private Storage authorization; recurrence uniqueness; Date Night/Goal CAS and lifecycle guards. | Existing migrations 001–027 and proofs are historical evidence, not proof of new lifecycle behavior or managed hosting. |
+| Implemented locally; final verification incomplete | Two-account allowlist, closed signup, couple closure, irreversible deletion request, ordinary restore, privacy blocks/redaction, minimized audit, and worker queue in migrations 028–030 with UI/Edge Functions. | Migration 031 and CP-013 database proof remain pending after local PostgreSQL stopped responding. Maintenance scheduling/alerts, Storage cleanup, managed Auth deletion and restore replay remain unverified. |
+| Intentionally disabled | Profile photos, public registration, export, offline sync, durable web sessions, Savings, notifications, unrestricted invitations. | Keep disabled until their scoped operational/security release gates pass. |
+| Provider/legal blockers | Backup aging and restore replay, managed-role migration compatibility, hosted Auth restrictions, SMTP, schedule/alerts, final legal terms and support operation. | No hosted services were accessed. These require isolated staging, provider configuration and legal review. |
+
+The following CP-003B rows and sequence are retained as historical planning evidence only; they do not describe current implementation status.
+
+| Status | Policy areas | Evidence and limit |
+| --- | --- | --- |
+| Historical CP-003B assessment | Earlier proposal-time status for D01–D11/P01–P09. | Preserved as history; current controlling implementation status appears above. |
+| Provider-dependent / cannot be verified locally | Managed Supabase grants/migration behavior; hosted Auth restriction; actual backup aging and restore; Storage derivative cleanup; production cache controls; final legal entity/contact/jurisdiction; browser-only workflows. | Requires isolated managed staging, provider-side evidence, human legal review, and manual UI testing. No hosted system was accessed. |
+
+### Historical CP-003B implementation sequence
+
+The following older sequence is preserved as decision history and is not the current implementation plan.
+
+1. **Recover local verification safely:** apply pending migration 031 without resetting data, run the rollback-only CP-013 proof, then focused Flutter checks and Web release build.
+2. **Complete lifecycle proofs:** test stale JWTs, closure/write races, retries, privacy blocks, retention boundaries, Auth deletion retry and Storage cleanup failure.
+3. **Verify isolated managed staging:** dry-run migrations in order; configure the exact two users, disable signup/invites at provider and database layers; validate RLS, Auth, SMTP, Edge Functions and private Storage.
+4. **Prove operations:** configure maintenance scheduling/alerts and perform a quarantined restore/replay drill; verify backup aging and rollback.
+5. **Finish manual UI/legal gates:** two-account responsive review, destructive-action disclosures, counsel-approved legal documents, entity/contact/jurisdiction and the support process.
+
+### Genuine user decisions and technical gates still open
+
+- **Support-export configuration:** Set a real support contact, named operators, identity verification, response target, secure delivery, temporary expiry and verified deletion process. No contact is assumed.
+- **Operational/legal question — pending review:** Counsel and infrastructure owners must verify jurisdiction-specific financial retention, actual provider backup/delete behavior, and maximum residual-copy time. No legal requirement is presumed.
+- **Operational detail — pending:** Define access controls and a retention duration for minimal privacy-request processing metadata, plus the responsible owner/alert path for purge failures. The content-removal behavior and 24-hour target are approved policy, not pending product decisions.
+- **Provider gate:** Verify whether 30-day backups and restore-time replay can meet the approved targets; document maximum residual-copy time if backups contain rows past primary purge.
+- **Legal review:** Confirm applicable financial-record duties, privacy-request rights, entity/contact, and jurisdiction with qualified counsel. No legal requirement or compliance status is asserted here.
+
+Account deletion recovery is not offered in V1. Either currently paired partner may restore ordinary shared text only within the seven-day window through the guarded restore flow; privacy removal always defeats restoration.
+
+## Historical CP-003B proposal matrix (superseded)
+
+The status matrix and technical recommendation detail below preserve CP-003B history. They are not the current Private Beta V1 approval register. Where their old status or numerical recommendations conflict with the approved policy above, the V1 addendum controls. Preserve these sections for decision history; do not treat old “pending approval” labels as the current policy status.
 
 | ID | Decision | Status | Remaining gate |
 | --- | --- | --- | --- |
@@ -29,9 +168,9 @@ Status meanings: **already approved** applies to D01, D02, D06 and D09 (D02 reta
 | D10 | Deletion and limited cancellation | technically endorsed pending formal approval | Formal approval with P07; secure reauthentication/recovery process and operational purge evidence. |
 | D11 | Recurrence identity and edge cases | technically endorsed pending formal approval | Formal approval; calendar library/tzdata compatibility and future-series-edit semantics, count behavior and RRULE interoperability must be specified/tested before recurrence migration. |
 
-## Decision specifications
+## Historical CP-003B technical proposals — preserved for decision history
 
-Each final proposed wording below includes its dependencies; an endorsed direction does not endorse an unresolved dependent policy. Required tests are future acceptance requirements, **not tests run in this documentation phase**.
+The detailed decision text below records the earlier CP-003B proposal stage. Its statuses and archive/recovery/retention recommendations are not the current Private Beta V1 approval state. Apply the Private Beta V1 addendum above where wording differs. Required tests below remain useful acceptance guidance, **not tests run in this documentation phase**.
 
 ### D01 — Couple membership and archive reuse
 

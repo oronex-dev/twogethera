@@ -28,6 +28,10 @@ abstract final class AppTheme {
         );
       }
     }
+    final (gradientStart, gradientEnd) = AppearancePalettes.gradientFor(
+      preferences,
+      brightness,
+    );
     final colors = BrandColors(
       primary: palette.primary,
       secondary: palette.secondary,
@@ -36,8 +40,10 @@ abstract final class AppTheme {
       canvas: palette.background,
       panel: palette.surface,
       border: palette.border,
-      heroStart: palette.heroStart,
-      heroEnd: palette.heroEnd,
+      heroStart: gradientStart,
+      heroEnd: gradientEnd,
+      heroBegin: preferences.gradientDirection.begin,
+      heroFinish: preferences.gradientDirection.end,
     );
     final generated = ColorScheme.fromSeed(
       seedColor: palette.primary,
@@ -67,30 +73,33 @@ abstract final class AppTheme {
       extensions: [colors],
       scaffoldBackgroundColor: colors.canvas,
       visualDensity: VisualDensity.standard,
-      textTheme: text.copyWith(
-        displayLarge: text.displayLarge?.copyWith(
-          fontSize: 54,
-          height: 1.08,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -2,
+      textTheme: _scaleTextTheme(
+        text.copyWith(
+          displayLarge: text.displayLarge?.copyWith(
+            fontSize: 54,
+            height: 1.08,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -2,
+          ),
+          headlineLarge: text.headlineLarge?.copyWith(
+            fontSize: 34,
+            height: 1.15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -1,
+          ),
+          headlineMedium: text.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.6,
+          ),
+          titleLarge: text.titleLarge?.copyWith(
+            fontSize: 21,
+            fontWeight: FontWeight.w600,
+            height: 1.3,
+          ),
+          bodyLarge: text.bodyLarge?.copyWith(fontSize: 16, height: 1.6),
+          bodyMedium: text.bodyMedium?.copyWith(height: 1.5),
         ),
-        headlineLarge: text.headlineLarge?.copyWith(
-          fontSize: 34,
-          height: 1.15,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -1,
-        ),
-        headlineMedium: text.headlineMedium?.copyWith(
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.6,
-        ),
-        titleLarge: text.titleLarge?.copyWith(
-          fontSize: 21,
-          fontWeight: FontWeight.w600,
-          height: 1.3,
-        ),
-        bodyLarge: text.bodyLarge?.copyWith(fontSize: 16, height: 1.6),
-        bodyMedium: text.bodyMedium?.copyWith(height: 1.5),
+        preferences.fontSize.scale,
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: colors.canvas,
@@ -142,5 +151,32 @@ abstract final class AppTheme {
     final lightContrast = 1.05 / (luminance + .05);
     final darkContrast = (luminance + .05) / .05;
     return darkContrast >= lightContrast ? Colors.black : Colors.white;
+  }
+
+  static TextTheme _scaleTextTheme(TextTheme theme, double scale) {
+    TextStyle? scaled(TextStyle? style) {
+      final size = style?.fontSize;
+      return style == null || size == null
+          ? style
+          : style.copyWith(fontSize: size * scale);
+    }
+
+    return theme.copyWith(
+      displayLarge: scaled(theme.displayLarge),
+      displayMedium: scaled(theme.displayMedium),
+      displaySmall: scaled(theme.displaySmall),
+      headlineLarge: scaled(theme.headlineLarge),
+      headlineMedium: scaled(theme.headlineMedium),
+      headlineSmall: scaled(theme.headlineSmall),
+      titleLarge: scaled(theme.titleLarge),
+      titleMedium: scaled(theme.titleMedium),
+      titleSmall: scaled(theme.titleSmall),
+      bodyLarge: scaled(theme.bodyLarge),
+      bodyMedium: scaled(theme.bodyMedium),
+      bodySmall: scaled(theme.bodySmall),
+      labelLarge: scaled(theme.labelLarge),
+      labelMedium: scaled(theme.labelMedium),
+      labelSmall: scaled(theme.labelSmall),
+    );
   }
 }

@@ -10,6 +10,7 @@ import '../../../shared/widgets/responsive_page.dart';
 import '../../../shared/widgets/together_mark.dart';
 import '../../appearance/application/appearance_controller.dart';
 import '../../appearance/domain/appearance_preferences.dart';
+import '../../legal/presentation/legal_document_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -19,9 +20,24 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  static const _personalColorSwatches = <(String, Color)>[
+    ('Rose', Color(0xFF9B4D69)),
+    ('Lavender', Color(0xFF77617E)),
+    ('Plum', Color(0xFF694AA0)),
+    ('Ocean', Color(0xFF356B8C)),
+    ('Emerald', Color(0xFF26735E)),
+    ('Champagne', Color(0xFF806321)),
+  ];
   final _hexController = TextEditingController();
   Color? _previewColor;
   String? _hexError;
+  GradientPreset? _previewGradientPreset;
+  GradientDirection _gradientDirection = GradientDirection.diagonal;
+  Color _gradientStart = const Color(0xFFF8EBED);
+  Color _gradientEnd = const Color(0xFFEDE7F8);
+  double _primaryHue = 338;
+  double _startHue = 338;
+  double _endHue = 272;
 
   @override
   void dispose() {
@@ -39,12 +55,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         (state.userId != null && !state.loaded);
     final mode = preferences.mode;
     final effectiveBrightness = Theme.of(context).brightness;
+    if (_previewGradientPreset == null) {
+      _gradientDirection = preferences.gradientDirection;
+      if (preferences.gradientPreset == GradientPreset.custom) {
+        _gradientStart =
+            parseHexColor(preferences.gradientStartHex ?? '') ??
+            const Color(0xFFF8EBED);
+        _gradientEnd =
+            parseHexColor(preferences.gradientEndHex ?? '') ??
+            const Color(0xFFEDE7F8);
+        _startHue = HSVColor.fromColor(_gradientStart).hue;
+        _endHue = HSVColor.fromColor(_gradientEnd).hue;
+      }
+    }
     final previewColor = _previewColor;
-    final previewPreferences = previewColor == null
-        ? null
-        : preferences.copyWith(
-            customHex:
-                '#${previewColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
+    final appearancePreview = previewColor == null
+        ? preferences
+        : preferences.copyWith(customHex: _toHex(previewColor));
+    final previewPreset = _previewGradientPreset;
+    final previewPreferences = previewPreset == null
+        ? (previewColor == null ? null : appearancePreview)
+        : appearancePreview.copyWith(
+            gradientPreset: previewPreset,
+            gradientDirection: _gradientDirection,
+            gradientStartHex: previewPreset == GradientPreset.custom
+                ? _toHex(_gradientStart)
+                : null,
+            gradientEndHex: previewPreset == GradientPreset.custom
+                ? _toHex(_gradientEnd)
+                : null,
+            clearGradientColors: previewPreset != GradientPreset.custom,
           );
 
     return ResponsivePage(
@@ -81,6 +121,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const SizedBox(height: 16),
           ],
+          Text(
+            'Personalization',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
           AdaptiveGrid(
             minWidth: 370,
             children: [
@@ -112,9 +157,81 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Enter a six-digit HEX color. Preview it first; your selected theme keeps its calm surfaces and gets a coordinated accent palette.',
+                  'Choose a swatch or adjust the hue. The coordinated accent preview keeps your selected theme’s calm surfaces.',
                 ),
                 const SizedBox(height: 18),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final swatch in _personalColorSwatches)
+                      Semantics(
+                        button: true,
+                        label: swatch.$1,
+                        selected: previewColor == swatch.$2,
+                        child: Tooltip(
+                          message: swatch.$1,
+                          child: InkWell(
+                            onTap: busy
+                                ? null
+                                : () => setState(() {
+                                    _previewColor = swatch.$2;
+                                    _hexController.text = _toHex(swatch.$2);
+                                    _hexError = null;
+                                  }),
+                            customBorder: const CircleBorder(),
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: swatch.$2,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: previewColor == swatch.$2
+                                      ? Theme.of(context).colorScheme.onSurface
+                                      : BrandColors.of(context).border,
+                                  width: previewColor == swatch.$2 ? 3 : 1,
+                                ),
+                              ),
+                              child: previewColor == swatch.$2
+                                  ? Icon(
+                                      Icons.check_rounded,
+                                      color: _contrastTextForSwatch(swatch.$2),
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const SizedBox(width: 76, child: Text('Hue')),
+                    Expanded(
+                      child: Slider(
+                        min: 0,
+                        max: 360,
+                        divisions: 360,
+                        label: '${_primaryHue.round()}°',
+                        value: _primaryHue,
+                        onChanged: busy
+                            ? null
+                            : (value) => setState(() {
+                                _primaryHue = value;
+                                _previewColor = HSVColor.fromAHSV(
+                                  1,
+                                  value,
+                                  .58,
+                                  .58,
+                                ).toColor();
+                                _hexController.text = _toHex(_previewColor!);
+                              }),
+                      ),
+                    ),
+                  ],
+                ),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final input = TextField(
@@ -208,6 +325,200 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 20),
           SurfaceCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Gradient identity',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Preview a soft brand gradient, then apply it to the app’s gradient surfaces.',
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final preset in GradientPreset.values)
+                      ChoiceChip(
+                        label: Text(preset.label),
+                        selected:
+                            (previewPreset ?? preferences.gradientPreset) ==
+                            preset,
+                        onSelected: busy
+                            ? null
+                            : (_) => setState(() {
+                                _previewGradientPreset = preset;
+                                final colors = AppearancePalettes.gradientFor(
+                                  preferences.copyWith(gradientPreset: preset),
+                                  effectiveBrightness,
+                                );
+                                if (preset != GradientPreset.custom) {
+                                  _gradientStart = colors.$1;
+                                  _gradientEnd = colors.$2;
+                                }
+                              }),
+                      ),
+                  ],
+                ),
+                if ((previewPreset ?? preferences.gradientPreset) ==
+                    GradientPreset.custom) ...[
+                  const SizedBox(height: 12),
+                  _HueControl(
+                    label: 'First color',
+                    value: _startHue,
+                    color: _gradientStart,
+                    disabled: busy,
+                    onChanged: (hue) => setState(() {
+                      _previewGradientPreset = GradientPreset.custom;
+                      _startHue = hue;
+                      _gradientStart = HSVColor.fromAHSV(
+                        1,
+                        hue,
+                        .28,
+                        .96,
+                      ).toColor();
+                    }),
+                  ),
+                  _HueControl(
+                    label: 'Second color',
+                    value: _endHue,
+                    color: _gradientEnd,
+                    disabled: busy,
+                    onChanged: (hue) => setState(() {
+                      _previewGradientPreset = GradientPreset.custom;
+                      _endHue = hue;
+                      _gradientEnd = HSVColor.fromAHSV(
+                        1,
+                        hue,
+                        .24,
+                        .92,
+                      ).toColor();
+                    }),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                SegmentedButton<GradientDirection>(
+                  segments: [
+                    for (final direction in GradientDirection.values)
+                      ButtonSegment(
+                        value: direction,
+                        label: Text(direction.label),
+                      ),
+                  ],
+                  selected: {_gradientDirection},
+                  onSelectionChanged: busy
+                      ? null
+                      : (value) => setState(() {
+                          _gradientDirection = value.first;
+                          _previewGradientPreset ??= preferences.gradientPreset;
+                        }),
+                ),
+                const SizedBox(height: 14),
+                if (previewPreferences != null)
+                  _AppearancePreview(
+                    preferences: previewPreferences,
+                    brightness: effectiveBrightness,
+                    title: 'Gradient preview · not applied',
+                  )
+                else
+                  _AppearancePreview(
+                    preferences: preferences,
+                    brightness: effectiveBrightness,
+                    title: 'Current gradient',
+                  ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              final controller = ref.read(
+                                appearanceControllerProvider.notifier,
+                              );
+                              final preset =
+                                  previewPreset ?? preferences.gradientPreset;
+                              final saved = preset == GradientPreset.custom
+                                  ? await controller.applyCustomGradient(
+                                      start: _gradientStart,
+                                      end: _gradientEnd,
+                                      direction: _gradientDirection,
+                                    )
+                                  : await controller.selectGradientPreset(
+                                      preset,
+                                      direction: _gradientDirection,
+                                    );
+                              if (saved && mounted) {
+                                setState(() => _previewGradientPreset = null);
+                              }
+                            },
+                      child: const Text('Apply gradient'),
+                    ),
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              final saved = await ref
+                                  .read(appearanceControllerProvider.notifier)
+                                  .selectGradientPreset(
+                                    GradientPreset.roseDawn,
+                                  );
+                              if (saved && mounted) {
+                                setState(() {
+                                  _previewGradientPreset = null;
+                                  _gradientDirection =
+                                      GradientDirection.diagonal;
+                                });
+                              }
+                            },
+                      child: const Text('Reset gradient'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          SurfaceCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Text size',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'This preference adjusts the app’s text while preserving your device text scaling.',
+                ),
+                const SizedBox(height: 12),
+                SegmentedButton<PersonalFontSize>(
+                  segments: [
+                    for (final size in PersonalFontSize.values)
+                      ButtonSegment(value: size, label: Text(size.label)),
+                  ],
+                  selected: {preferences.fontSize},
+                  onSelectionChanged: busy
+                      ? null
+                      : (selection) => ref
+                            .read(appearanceControllerProvider.notifier)
+                            .setFontSize(selection.first),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'A little more room for what matters.',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          SurfaceCard(
             child: Row(
               children: [
                 const Expanded(
@@ -225,6 +536,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          const SurfaceCard(child: LegalDocumentLinks()),
         ],
       ),
     );
@@ -239,6 +552,58 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           : null;
     });
   }
+
+  String _toHex(Color color) =>
+      '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+
+  Color _contrastTextForSwatch(Color color) {
+    final luminance = color.computeLuminance();
+    final whiteContrast = 1.05 / (luminance + .05);
+    final blackContrast = (luminance + .05) / .05;
+    return blackContrast >= whiteContrast ? Colors.black : Colors.white;
+  }
+}
+
+class _HueControl extends StatelessWidget {
+  const _HueControl({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.disabled,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final Color color;
+  final bool disabled;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      SizedBox(
+        width: 92,
+        child: Row(
+          children: [
+            CircleAvatar(radius: 9, backgroundColor: color),
+            const SizedBox(width: 8),
+            Expanded(child: Text(label, maxLines: 1)),
+          ],
+        ),
+      ),
+      Expanded(
+        child: Slider(
+          min: 0,
+          max: 360,
+          divisions: 360,
+          label: '${value.round()}°',
+          value: value,
+          onChanged: disabled ? null : onChanged,
+        ),
+      ),
+    ],
+  );
 }
 
 class _ModeCard extends StatelessWidget {
@@ -446,6 +811,41 @@ class _AppearancePreview extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 12),
+            Container(
+              height: 56,
+              width: double.infinity,
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: BrandColors.of(context).heroBegin,
+                  end: BrandColors.of(context).heroFinish,
+                  colors: [
+                    BrandColors.of(context).heroStart,
+                    BrandColors.of(context).heroEnd,
+                  ],
+                ),
+              ),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: BrandColors.of(context).border),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    'A softer way to plan together',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ),
+            ),
             const SizedBox(height: 12),
             Card(
               child: Padding(

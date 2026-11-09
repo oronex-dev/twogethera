@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:twogethera/app/routing/app_router.dart';
 import 'package:twogethera/features/authentication/application/auth_controller.dart';
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
+import 'package:twogethera/features/authentication/domain/password_policy.dart';
 
 import 'authentication_test.dart' show FakeAuthRepository, setup, show;
 
@@ -41,7 +42,7 @@ class LifecycleFake extends FakeAuthRepository
 
   @override
   Future<void> updatePassword(String password) async {
-    if (password.length < 16) {
+    if (validateNewPassword(password) != null) {
       throw const AuthFailure(AuthProblem.passwordRejected);
     }
     events.add(AuthSignal.cleared);
@@ -196,7 +197,7 @@ void main() {
         container.read(authControllerProvider).problem,
         AuthProblem.passwordRejected,
       );
-      await controller.updatePassword('new-long-unit-password');
+      await controller.updatePassword('NewPass123!');
       await tester.pumpAndSettle();
       expect(container.read(authControllerProvider).phase, AuthPhase.signedOut);
       expect(container.read(authControllerProvider).context, isNull);

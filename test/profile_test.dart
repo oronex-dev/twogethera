@@ -10,6 +10,10 @@ class _Profiles implements ProfileRepository {
   String? loadedUser;
   String? savedUser;
   int partnerLoads = 0;
+  final avatars = <String, Uint8List>{};
+  int avatarDownloads = 0;
+  int avatarUploads = 0;
+  int avatarRemovals = 0;
   String? removeFailure;
   bool failLoad = false;
   bool failPartnerLoad = false;
@@ -52,7 +56,10 @@ class _Profiles implements ProfileRepository {
   }
 
   @override
-  Future<Uint8List?> downloadAvatar(String path) async => null;
+  Future<Uint8List?> downloadAvatar(String path) async {
+    avatarDownloads++;
+    return avatars[path];
+  }
 
   @override
   Future<UserProfile> saveMyProfile({
@@ -77,10 +84,16 @@ class _Profiles implements ProfileRepository {
   Future<String> uploadMyAvatar({
     required String userId,
     required Uint8List bytes,
-  }) async => '$userId/avatar';
+  }) async {
+    avatarUploads++;
+    final path = '$userId/avatar';
+    avatars[path] = Uint8List.fromList(bytes);
+    return path;
+  }
 
   @override
   Future<void> removeMyAvatar(String path) async {
+    avatarRemovals++;
     if (removeFailure != null) throw const ProfileFailure();
   }
 }
@@ -188,18 +201,45 @@ void main() {
   );
 
   test(
-    'failed photo purge keeps partner visibility revoked in client state',
+    'profile photo workflow remains disabled before its security gate',
     () async {
       final controller = container.read(profileControllerProvider.notifier);
-      await controller.load(const AccountContext(userId: 'user-a', spaces: []));
-      repository.removeFailure = 'unavailable';
+      await controller.load(
+        const AccountContext(
+          userId: 'user-a',
+          spaces: [SpaceContext(id: 'couple', state: 'paired', epoch: 1)],
+        ),
+      );
 
+      expect(repository.avatarDownloads, 0);
+      expect(
+        await controller.updateAvatar(Uint8List.fromList([1, 2, 3])),
+        isFalse,
+      );
       expect(await controller.removeAvatar(), isFalse);
-      final state = container.read(profileControllerProvider);
-      expect(state.myProfile?.avatarPath, isNull);
-      expect(state.myAvatarBytes, isNull);
-      expect(state.pendingAvatarRemovalPath, 'user-a/avatar');
-      expect(state.error, contains('Partner access is blocked'));
+      expect(repository.avatarUploads, 0);
+      expect(repository.avatarRemovals, 0);
+      expect(repository.profile.avatarPath, 'user-a/avatar');
+    },
+  );
+
+  test(
+    'photo upload and download are not invoked before verification',
+    () async {
+      final controller = container.read(profileControllerProvider.notifier);
+      const account = AccountContext(userId: 'user-a', spaces: []);
+      await controller.load(account);
+      final uploaded = Uint8List.fromList([1, 2, 3, 4]);
+      expect(await controller.updateAvatar(uploaded), isFalse);
+      expect(repository.profile.avatarPath, 'user-a/avatar');
+
+      controller.clear();
+      await controller.load(account);
+      final restored = container.read(profileControllerProvider);
+      expect(restored.myProfile?.avatarPath, 'user-a/avatar');
+      expect(restored.myAvatarBytes, isNull);
+      expect(repository.avatarUploads, 0);
+      expect(repository.avatarDownloads, 0);
     },
   );
 }

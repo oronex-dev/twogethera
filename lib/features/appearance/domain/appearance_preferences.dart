@@ -9,6 +9,72 @@ enum TwogetheraTheme {
   midnightSlate,
 }
 
+enum PersonalFontSize {
+  small('small', 'Small', 0.92),
+  defaultSize('default', 'Default', 1),
+  large('large', 'Large', 1.12);
+
+  const PersonalFontSize(this.storageKey, this.label, this.scale);
+  final String storageKey;
+  final String label;
+  final double scale;
+
+  static PersonalFontSize fromStorageKey(Object? value) =>
+      PersonalFontSize.values.firstWhere(
+        (size) => size.storageKey == value,
+        orElse: () => PersonalFontSize.defaultSize,
+      );
+}
+
+enum GradientPreset {
+  roseDawn('rose_dawn', 'Rose dawn'),
+  softLilac('soft_lilac', 'Soft lilac'),
+  champagneGlow('champagne_glow', 'Champagne glow'),
+  oceanMist('ocean_mist', 'Ocean mist'),
+  emeraldMorning('emerald_morning', 'Emerald morning'),
+  custom('custom', 'Custom');
+
+  const GradientPreset(this.storageKey, this.label);
+  final String storageKey;
+  final String label;
+
+  static GradientPreset fromStorageKey(Object? value) =>
+      GradientPreset.values.firstWhere(
+        (preset) => preset.storageKey == value,
+        orElse: () => GradientPreset.roseDawn,
+      );
+}
+
+enum GradientDirection {
+  diagonal('diagonal', 'Diagonal'),
+  horizontal('horizontal', 'Horizontal'),
+  vertical('vertical', 'Vertical');
+
+  const GradientDirection(this.storageKey, this.label);
+  final String storageKey;
+  final String label;
+
+  static GradientDirection fromStorageKey(Object? value) =>
+      GradientDirection.values.firstWhere(
+        (direction) => direction.storageKey == value,
+        orElse: () => GradientDirection.diagonal,
+      );
+}
+
+extension GradientDirectionAlignment on GradientDirection {
+  AlignmentGeometry get begin => switch (this) {
+    GradientDirection.diagonal => Alignment.topLeft,
+    GradientDirection.horizontal => Alignment.centerLeft,
+    GradientDirection.vertical => Alignment.topCenter,
+  };
+
+  AlignmentGeometry get end => switch (this) {
+    GradientDirection.diagonal => Alignment.bottomRight,
+    GradientDirection.horizontal => Alignment.centerRight,
+    GradientDirection.vertical => Alignment.bottomCenter,
+  };
+}
+
 extension TwogetheraThemeLabel on TwogetheraTheme {
   String get label => switch (this) {
     TwogetheraTheme.roseGold => 'Rose Gold',
@@ -40,21 +106,46 @@ class AppearancePreferences {
     this.mode = ThemeMode.system,
     this.theme = TwogetheraTheme.roseGold,
     this.customHex,
+    this.fontSize = PersonalFontSize.defaultSize,
+    this.gradientPreset = GradientPreset.roseDawn,
+    this.gradientStartHex,
+    this.gradientEndHex,
+    this.gradientDirection = GradientDirection.diagonal,
   });
 
   final ThemeMode mode;
   final TwogetheraTheme theme;
   final String? customHex;
+  final PersonalFontSize fontSize;
+  final GradientPreset gradientPreset;
+  final String? gradientStartHex;
+  final String? gradientEndHex;
+  final GradientDirection gradientDirection;
 
   AppearancePreferences copyWith({
     ThemeMode? mode,
     TwogetheraTheme? theme,
     String? customHex,
     bool clearCustomHex = false,
+    PersonalFontSize? fontSize,
+    GradientPreset? gradientPreset,
+    String? gradientStartHex,
+    String? gradientEndHex,
+    GradientDirection? gradientDirection,
+    bool clearGradientColors = false,
   }) => AppearancePreferences(
     mode: mode ?? this.mode,
     theme: theme ?? this.theme,
     customHex: clearCustomHex ? null : customHex ?? this.customHex,
+    fontSize: fontSize ?? this.fontSize,
+    gradientPreset: gradientPreset ?? this.gradientPreset,
+    gradientStartHex: clearGradientColors
+        ? null
+        : gradientStartHex ?? this.gradientStartHex,
+    gradientEndHex: clearGradientColors
+        ? null
+        : gradientEndHex ?? this.gradientEndHex,
+    gradientDirection: gradientDirection ?? this.gradientDirection,
   );
 
   Map<String, dynamic> toJson() => {
@@ -65,6 +156,11 @@ class AppearancePreferences {
     },
     'appearance_theme': theme.storageKey,
     'appearance_custom_hex': customHex?.toUpperCase(),
+    'appearance_font_size': fontSize.storageKey,
+    'appearance_gradient_preset': gradientPreset.storageKey,
+    'appearance_gradient_start_hex': gradientStartHex?.toUpperCase(),
+    'appearance_gradient_end_hex': gradientEndHex?.toUpperCase(),
+    'appearance_gradient_direction': gradientDirection.storageKey,
   };
 
   factory AppearancePreferences.fromJson(Map<String, dynamic> json) {
@@ -77,10 +173,27 @@ class AppearancePreferences {
     final customHex = rawHex is String && parseHexColor(rawHex) != null
         ? '#${rawHex.replaceFirst('#', '').toUpperCase()}'
         : null;
+    final start = json['appearance_gradient_start_hex'];
+    final end = json['appearance_gradient_end_hex'];
+    final startHex = start is String && parseHexColor(start) != null
+        ? '#${start.replaceFirst('#', '').toUpperCase()}'
+        : null;
+    final endHex = end is String && parseHexColor(end) != null
+        ? '#${end.replaceFirst('#', '').toUpperCase()}'
+        : null;
     return AppearancePreferences(
       mode: mode,
       theme: TwogetheraThemeLabel.fromStorageKey(json['appearance_theme']),
       customHex: customHex,
+      fontSize: PersonalFontSize.fromStorageKey(json['appearance_font_size']),
+      gradientPreset: GradientPreset.fromStorageKey(
+        json['appearance_gradient_preset'],
+      ),
+      gradientStartHex: startHex,
+      gradientEndHex: endHex,
+      gradientDirection: GradientDirection.fromStorageKey(
+        json['appearance_gradient_direction'],
+      ),
     );
   }
 }
@@ -288,6 +401,72 @@ abstract final class AppearancePalettes {
       heroStart: Color.lerp(base.heroStart, customPrimary, .16)!,
       heroEnd: Color.lerp(base.heroEnd, scheme.secondary, .14)!,
     );
+  }
+
+  static (Color, Color) gradientFor(
+    AppearancePreferences preferences,
+    Brightness brightness,
+  ) {
+    if (preferences.gradientPreset == GradientPreset.custom) {
+      final start = preferences.gradientStartHex == null
+          ? null
+          : parseHexColor(preferences.gradientStartHex!);
+      final end = preferences.gradientEndHex == null
+          ? null
+          : parseHexColor(preferences.gradientEndHex!);
+      if (start != null && end != null) return (start, end);
+    }
+    final dark = brightness == Brightness.dark;
+    return switch ((preferences.gradientPreset, dark)) {
+      (GradientPreset.roseDawn, false) => (
+        const Color(0xFFF8EBED),
+        const Color(0xFFEDE7F8),
+      ),
+      (GradientPreset.roseDawn, true) => (
+        const Color(0xFF30243B),
+        const Color(0xFF382530),
+      ),
+      (GradientPreset.softLilac, false) => (
+        const Color(0xFFE9E2F5),
+        const Color(0xFFF6E9F0),
+      ),
+      (GradientPreset.softLilac, true) => (
+        const Color(0xFF30263F),
+        const Color(0xFF342A3A),
+      ),
+      (GradientPreset.champagneGlow, false) => (
+        const Color(0xFFF5ECD9),
+        const Color(0xFFF0E9E0),
+      ),
+      (GradientPreset.champagneGlow, true) => (
+        const Color(0xFF342D1F),
+        const Color(0xFF352D27),
+      ),
+      (GradientPreset.oceanMist, false) => (
+        const Color(0xFFE6F0F6),
+        const Color(0xFFE9EAF6),
+      ),
+      (GradientPreset.oceanMist, true) => (
+        const Color(0xFF1E303A),
+        const Color(0xFF282A3A),
+      ),
+      (GradientPreset.emeraldMorning, false) => (
+        const Color(0xFFE4F1E9),
+        const Color(0xFFE5EEE7),
+      ),
+      (GradientPreset.emeraldMorning, true) => (
+        const Color(0xFF1D332A),
+        const Color(0xFF29352B),
+      ),
+      (GradientPreset.custom, false) => (
+        const Color(0xFFF8EBED),
+        const Color(0xFFEDE7F8),
+      ),
+      (GradientPreset.custom, true) => (
+        const Color(0xFF30243B),
+        const Color(0xFF382530),
+      ),
+    };
   }
 
   static ThemePalette _palette(

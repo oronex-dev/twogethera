@@ -14,6 +14,9 @@ import '../../features/shared_planner/presentation/shared_planner_screen.dart';
 import '../../features/shared_planner/presentation/global_search_screen.dart';
 import '../../features/budget/presentation/budget_screen.dart';
 import '../../features/memories/presentation/memories_screen.dart';
+import '../../features/date_nights/presentation/date_nights_screen.dart';
+import '../../features/goals/presentation/shared_goals_screen.dart';
+import '../../features/legal/presentation/legal_document_screen.dart';
 import '../../shared/widgets/responsive_page.dart';
 
 String? _safeNextRoute(String? value) {
@@ -26,6 +29,8 @@ String? _safeNextRoute(String? value) {
       uri.path == '/account' ||
       uri.path == '/budget' ||
       uri.path == '/memories' ||
+      uri.path == '/date-nights' ||
+      uri.path == '/goals' ||
       uri.path == '/') {
     return uri.path;
   }
@@ -95,6 +100,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           !authenticated) {
         return '/auth/local?next=${Uri.encodeComponent(route.uri.toString())}';
       }
+      if ((route.uri.path == '/date-nights' || route.uri.path == '/goals') &&
+          !authenticated) {
+        return '/auth/local?next=${Uri.encodeComponent(route.uri.toString())}';
+      }
       if (route.uri.path.startsWith('/auth/') && authenticated) {
         return _safeNextRoute(route.uri.queryParameters['next']) ?? '/';
       }
@@ -136,6 +145,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/partner',
         builder: (context, state) => const PartnerLinkingScreen(),
       ),
+      // Legal documents render their own AppBar and should not be wrapped in
+      // the adaptive planner shell (which would duplicate navigation chrome).
+      GoRoute(
+        path: '/privacy',
+        builder: (context, state) =>
+            const LegalDocumentScreen(type: LegalDocumentType.privacy),
+      ),
+      GoRoute(
+        path: '/terms',
+        builder: (context, state) =>
+            const LegalDocumentScreen(type: LegalDocumentType.terms),
+      ),
       ShellRoute(
         builder: (context, state, child) => AdaptiveShell(
           path: state.uri.path,
@@ -171,6 +192,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/memories',
             builder: (context, state) => const MemoriesScreen(),
+          ),
+          GoRoute(
+            path: '/date-nights',
+            builder: (context, state) => const DateNightsScreen(),
+          ),
+          GoRoute(
+            path: '/goals',
+            builder: (context, state) => const SharedGoalsScreen(),
           ),
         ],
       ),

@@ -21,11 +21,18 @@ enum AuthPhase {
 }
 
 class AuthViewState {
-  const AuthViewState(this.phase, {this.context, this.problem, this.notice});
+  const AuthViewState(
+    this.phase, {
+    this.context,
+    this.problem,
+    this.notice,
+    this.lifecycleBusy = false,
+  });
   final AuthPhase phase;
   final AccountContext? context;
   final AuthProblem? problem;
   final String? notice;
+  final bool lifecycleBusy;
   bool get suspended => problem == AuthProblem.denied;
   bool get expired => problem == AuthProblem.expired;
   bool get recoverableNetworkFailure => problem == AuthProblem.unavailable;
@@ -69,6 +76,17 @@ final sharedPlannerRepositoryProvider = Provider<SharedPlannerRepository>((
   }
   throw const AuthFailure(AuthProblem.configuration);
 });
+final recoverableSharedRecordsProvider =
+    FutureProvider<List<RecoverableSharedRecord>>((ref) async {
+      final state = ref.watch(authControllerProvider);
+      if (state.phase != AuthPhase.authenticated || state.context == null) {
+        return const [];
+      }
+      final repository = ref.watch(authRepositoryProvider);
+      if (repository is! SharedContentRecoveryRepository) return const [];
+      return (repository as SharedContentRecoveryRepository)
+          .listRecoverableSharedRecords();
+    });
 final authControllerProvider = NotifierProvider<AuthController, AuthViewState>(
   AuthController.new,
 );
@@ -78,6 +96,8 @@ class AuthController extends Notifier<AuthViewState> {
   bool _busy = false;
   bool _alive = true;
   int _lease = 0;
+  String? _closeOperationId;
+  String? _deleteOperationId;
   @override
   AuthViewState build() {
     _alive = true;
@@ -141,27 +161,27 @@ class AuthController extends Notifier<AuthViewState> {
     return _lifecycle.accountContext();
   }, during: AuthPhase.refreshing);
 
-  Future<void> register(
-    String email,
-    String password, {
-    String? displayName,
-  }) => _run(
-    () async {
-      if (displayName == null) {
-        await _lifecycle.register(email.trim(), password);
-      } else {
-        final repository = _lifecycle;
-        if (repository is! AuthExperienceRepository) {
-          throw const AuthFailure(AuthProblem.configuration);
-        }
-        await repository.registerProfile(email.trim(), password, displayName);
-      }
-      return null;
-    },
-    success: AuthPhase.awaitingConfirmation,
-    notice:
-        'If the request is eligible, check your email for a confirmation link.',
-  );
+  Future<void> register(String email, String password, {String? displayName}) =>
+      _run(
+        () async {
+          if (displayName == null) {
+            await _lifecycle.register(email.trim(), password);
+          } else {
+            final repository = _lifecycle;
+            if (repository is! AuthExperienceRepository) {
+              throw const AuthFailure(AuthProblem.configuration);
+            }
+            await repository.registerProfile(
+              email.trim(),
+              password,
+              displayName,
+            );
+          }
+          return null;
+        },
+        success: AuthPhase.awaitingConfirmation,
+        notice: 'If eligible, check your email for a confirmation link. If you already have an account, sign in or request a new confirmation link.',
+      );
 
   Future<void> resendVerification(String email) => _run(
     () async {
@@ -217,6 +237,80 @@ class AuthController extends Notifier<AuthViewState> {
           notice: 'Local memory was cleared. Server sign-out could not be confirmed; issued credentials may remain valid.',
         );
       }
+    }
+  }
+
+  Future<bool> closeCoupleSpace() {
+    final operationId = _closeOperationId ??= newPartnerOperationId();
+    return _runPrivateBetaLifecycle(
+      (repository) => repository.closeCoupleSpace(operationId),
+      onSuccess: () => _closeOperationId = null,
+      notice:
+          'The shared space is closed. Both partners have lost server access.',
+    );
+  }
+
+  Future<bool> deleteAccount() {
+    final operationId = _deleteOperationId ??= newPartnerOperationId();
+    return _runPrivateBetaLifecycle(
+      (repository) => repository.deleteAccount(operationId),
+      onSuccess: () => _deleteOperationId = null,
+      notice: 'The deletion request was accepted. Sign-in has been cleared.',
+    );
+  }
+
+  Future<bool> _runPrivateBetaLifecycle(
+    Future<void> Function(PrivateBetaAccountLifecycleRepository) operation, {
+    required String notice,
+    required void Function() onSuccess,
+  }) async {
+    if (_busy || state.phase != AuthPhase.authenticated) return false;
+    final previous = state;
+    final repository = ref.read(authRepositoryProvider);
+    if (repository is! PrivateBetaAccountLifecycleRepository) {
+      state = AuthViewState(
+        AuthPhase.authenticated,
+        context: previous.context,
+        problem: AuthProblem.configuration,
+      );
+      return false;
+    }
+    final lifecycleRepository =
+        repository as PrivateBetaAccountLifecycleRepository;
+    _busy = true;
+    final version = ++_version;
+    state = AuthViewState(
+      AuthPhase.authenticated,
+      context: previous.context,
+      lifecycleBusy: true,
+    );
+    try {
+      await operation(lifecycleRepository);
+      if (_alive && version == _version) {
+        onSuccess();
+        state = AuthViewState(AuthPhase.signedOut, notice: notice);
+      }
+      return true;
+    } on AuthFailure catch (error) {
+      if (_alive && version == _version) {
+        state = AuthViewState(
+          AuthPhase.authenticated,
+          context: previous.context,
+          problem: error.problem,
+        );
+      }
+      return false;
+    } catch (_) {
+      if (_alive && version == _version) {
+        state = AuthViewState(
+          AuthPhase.authenticated,
+          context: previous.context,
+          problem: AuthProblem.lifecycleUnavailable,
+        );
+      }
+      return false;
+    } finally {
+      _busy = false;
     }
   }
 

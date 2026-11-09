@@ -84,7 +84,7 @@ class AppearanceIsolation:
 
     def create_user(self, label):
         email = f"cp010-{secrets.token_hex(5)}-{label}@example.invalid"
-        password = secrets.token_urlsafe(28)
+        password = "A" + secrets.token_hex(24) + "a1!"
         code, user = request(API + "/auth/v1/admin/users", "POST", {
             "email": email, "password": password, "email_confirm": True,
         }, {"apikey": self.anon, "Authorization": "Bearer " + self.admin,

@@ -107,6 +107,11 @@ void main() {
       mode: ThemeMode.dark,
       theme: TwogetheraTheme.oceanBlue,
       customHex: '#20A0D0',
+      fontSize: PersonalFontSize.large,
+      gradientPreset: GradientPreset.custom,
+      gradientStartHex: '#F0D7E4',
+      gradientEndHex: '#CFC7EA',
+      gradientDirection: GradientDirection.horizontal,
     );
     expect(
       AppearancePreferences.fromJson(preferences.toJson()).toJson(),
@@ -129,6 +134,33 @@ void main() {
     expect(custom.accent, isNot(rose.accent));
     expect(custom.heroStart, isNot(rose.heroStart));
   });
+
+  test(
+    'custom gradients and font scale apply without changing text contrast',
+    () {
+      const preferences = AppearancePreferences(
+        gradientPreset: GradientPreset.custom,
+        gradientStartHex: '#E8C5D1',
+        gradientEndHex: '#BDB3E8',
+        gradientDirection: GradientDirection.vertical,
+        fontSize: PersonalFontSize.large,
+      );
+      final theme = AppTheme.light(preferences);
+      final brand = theme.extension<BrandColors>()!;
+      expect(brand.heroStart, const Color(0xFFE8C5D1));
+      expect(brand.heroEnd, const Color(0xFFBDB3E8));
+      expect(brand.heroBegin, Alignment.topCenter);
+      expect(brand.heroFinish, Alignment.bottomCenter);
+      expect(
+        theme.textTheme.bodyLarge!.fontSize,
+        closeTo(AppTheme.light().textTheme.bodyLarge!.fontSize! * 1.12, .01),
+      );
+      expect(
+        _contrast(theme.colorScheme.onPrimary, theme.colorScheme.primary),
+        greaterThanOrEqualTo(4.5),
+      );
+    },
+  );
 
   test(
     'appearance changes persist per account and remain independent',
@@ -169,15 +201,37 @@ void main() {
         ThemeMode.dark,
       );
       await controller.applyCustomColor(const Color(0xFF6952A3));
+      await controller.setFontSize(PersonalFontSize.large);
+      await controller.applyCustomGradient(
+        start: const Color(0xFFE8C5D1),
+        end: const Color(0xFFBDB3E8),
+        direction: GradientDirection.vertical,
+      );
 
       expect(repository.values['partner-a']?.theme, TwogetheraTheme.emerald);
       expect(repository.values['partner-a']?.customHex, isNull);
+      expect(
+        repository.values['partner-a']?.fontSize,
+        PersonalFontSize.defaultSize,
+      );
       expect(
         repository.values['partner-b']?.theme,
         TwogetheraTheme.midnightSlate,
       );
       expect(repository.values['partner-b']?.customHex, '#6952A3');
-      expect(repository.saves, ['partner-a', 'partner-a', 'partner-b']);
+      expect(repository.values['partner-b']?.fontSize, PersonalFontSize.large);
+      expect(repository.values['partner-b']?.gradientStartHex, '#E8C5D1');
+      expect(
+        repository.values['partner-b']?.gradientDirection,
+        GradientDirection.vertical,
+      );
+      expect(repository.saves, [
+        'partner-a',
+        'partner-a',
+        'partner-b',
+        'partner-b',
+        'partner-b',
+      ]);
     },
   );
 
@@ -424,4 +478,69 @@ void main() {
       );
     },
   );
+
+  testWidgets('swatches, gradient presets, and personal font size persist', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _AppearanceRepository();
+    final container = ProviderContainer(
+      overrides: [
+        appearancePreferencesRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(appearanceControllerProvider.notifier).load('owner');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: Consumer(
+          builder: (context, ref, _) => MaterialApp(
+            theme: AppTheme.light(
+              ref.watch(appearanceControllerProvider).preferences,
+            ),
+            home: const Scaffold(body: SettingsScreen()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.byTooltip('Ocean'));
+    await tester.tap(find.byTooltip('Ocean'));
+    await tester.pumpAndSettle();
+    expect(find.text('Preview · not applied'), findsOneWidget);
+    await tester.ensureVisible(find.text('Apply color'));
+    await tester.tap(find.text('Apply color'));
+    await tester.pumpAndSettle();
+    expect(repository.values['owner']?.customHex, '#356B8C');
+
+    await tester.ensureVisible(find.text('Ocean mist'));
+    await tester.tap(find.text('Ocean mist'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Vertical'));
+    await tester.tap(find.text('Vertical'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Apply gradient'));
+    await tester.tap(find.text('Apply gradient'));
+    await tester.pumpAndSettle();
+    expect(
+      repository.values['owner']?.gradientPreset,
+      GradientPreset.oceanMist,
+    );
+    expect(
+      repository.values['owner']?.gradientDirection,
+      GradientDirection.vertical,
+    );
+
+    await tester.ensureVisible(find.text('Large'));
+    await tester.tap(find.text('Large'));
+    await tester.pumpAndSettle();
+    expect(repository.values['owner']?.fontSize, PersonalFontSize.large);
+    expect(tester.takeException(), isNull);
+  });
 }

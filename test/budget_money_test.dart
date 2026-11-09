@@ -12,6 +12,7 @@ void main() {
       expect(ExactMoney(12345, usd).format(), '123.45 USD');
       expect(ExactMoney.parse('123', jpy), 123);
       expect(ExactMoney.parse('1.234', kwd), 1234);
+      expect(ExactMoney.parse('0.00', usd, allowZero: true), 0);
     });
 
     test(
@@ -25,6 +26,75 @@ void main() {
         expect(ExactMoney.parse('90000000000.01', usd), isNull);
       },
     );
+  });
+
+  group('RecurringExpenseRule date-only schedule', () {
+    RecurringExpenseRule rule({
+      required String frequency,
+      required DateTime startsOn,
+      DateTime? endsOn,
+    }) => RecurringExpenseRule(
+      id: 'rule-1',
+      coupleId: 'couple-1',
+      title: 'Rent',
+      description: '',
+      amountMinor: 10000,
+      currency: usd,
+      category: BudgetCategory.housing,
+      paidByUser: 'user-a',
+      splitAUserId: 'user-a',
+      splitAMinor: 5000,
+      splitBUserId: 'user-b',
+      splitBMinor: 5000,
+      frequency: frequency,
+      startsOn: startsOn,
+      endsOn: endsOn,
+      active: true,
+      revision: 1,
+    );
+
+    test('monthly occurrences stay anchored and clamp at month end', () {
+      final schedule = rule(
+        frequency: 'monthly',
+        startsOn: DateTime(2026, 1, 31),
+      );
+      expect(
+        schedule.occurrencesBetween(DateTime(2026, 2), DateTime(2026, 3, 31)),
+        [DateTime(2026, 2, 28), DateTime(2026, 3, 31)],
+      );
+      expect(
+        schedule.nextUnrecordedOccurrence([DateTime(2026, 1, 31)]),
+        DateTime(2026, 2, 28),
+      );
+    });
+
+    test('yearly leap-day schedule clamps and returns to leap day', () {
+      final schedule = rule(
+        frequency: 'yearly',
+        startsOn: DateTime(2024, 2, 29),
+      );
+      expect(
+        schedule.occurrencesBetween(DateTime(2025), DateTime(2028, 12, 31)),
+        [
+          DateTime(2025, 2, 28),
+          DateTime(2026, 2, 28),
+          DateTime(2027, 2, 28),
+          DateTime(2028, 2, 29),
+        ],
+      );
+    });
+
+    test('start and inclusive end dates bound weekly occurrences', () {
+      final schedule = rule(
+        frequency: 'weekly',
+        startsOn: DateTime(2026, 1, 7),
+        endsOn: DateTime(2026, 1, 21),
+      );
+      expect(
+        schedule.occurrencesBetween(DateTime(2026, 1), DateTime(2026, 1, 31)),
+        [DateTime(2026, 1, 7), DateTime(2026, 1, 14), DateTime(2026, 1, 21)],
+      );
+    });
   });
 
   group('ExpenseSplit', () {

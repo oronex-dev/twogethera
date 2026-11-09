@@ -7,6 +7,7 @@ import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
 import '../../authentication/application/auth_controller.dart';
+import '../../authentication/domain/auth_repository.dart';
 import '../application/budget_controller.dart';
 import '../domain/budget_models.dart';
 
@@ -113,7 +114,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               title: 'Your budget is loading',
               body: 'Your couple data will appear here when available.',
             )
-          else if (snapshot.budget == null)
+          else if (snapshot.budget == null) ...[
             _BudgetEmpty(
               title: 'Start with a monthly budget',
               body: 'Choose a currency and spending limit. Existing amounts are never converted when the currency changes.',
@@ -122,8 +123,18 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('Create budget'),
               ),
-            )
-          else ...[
+            ),
+            const SizedBox(height: AppSpace.md),
+            _RecurringSection(
+              snapshot: snapshot,
+              onAdd: () => _editRecurring(snapshot),
+              onEdit: (rule) => _editRecurring(snapshot, rule: rule),
+              onToggleActive: (rule) => ref
+                  .read(budgetControllerProvider.notifier)
+                  .setRecurringRuleActive(rule, !rule.active),
+              onRecord: (rule) => _recordOccurrence(snapshot, rule),
+            ),
+          ] else ...[
             _BudgetSummary(
               snapshot: snapshot,
               saving: state.saving,
@@ -140,6 +151,10 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
             _RecurringSection(
               snapshot: snapshot,
               onAdd: () => _editRecurring(snapshot),
+              onEdit: (rule) => _editRecurring(snapshot, rule: rule),
+              onToggleActive: (rule) => ref
+                  .read(budgetControllerProvider.notifier)
+                  .setRecurringRuleActive(rule, !rule.active),
               onRecord: (rule) => _recordOccurrence(snapshot, rule),
             ),
             const SizedBox(height: AppSpace.md),
@@ -173,7 +188,10 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       builder: (context) => _BudgetFormDialog(
         initialCurrency: initialCurrency,
         initialLimit: initialLimit,
-        currencyLocked: budget != null && snapshot.expenses.isNotEmpty,
+        currencyLocked:
+            budget != null &&
+            (snapshot.expenses.isNotEmpty ||
+                snapshot.recurringRules.isNotEmpty),
       ),
     );
     if (result == null || !mounted) return;
@@ -258,20 +276,29 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   String get coupleIdOrEmpty =>
       ref.read(budgetControllerProvider).coupleId ?? '';
 
-  Future<void> _editRecurring(BudgetSnapshot snapshot) async {
+  Future<void> _editRecurring(
+    BudgetSnapshot snapshot, {
+    RecurringExpenseRule? rule,
+  }) async {
     final budget = snapshot.budget;
-    if (budget == null || snapshot.members.length != 2) return;
+    if (snapshot.members.length != 2) return;
     final values = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => _RecurringFormDialog(
-        currency: budget.currency,
+        currency:
+            rule?.currency ?? budget?.currency ?? CurrencyUnit.supported.first,
         members: snapshot.members,
+        rule: rule,
       ),
     );
     if (values != null && mounted) {
       await ref
           .read(budgetControllerProvider.notifier)
-          .saveRecurringRule(values);
+          .saveRecurringRule(
+            values,
+            ruleId: rule?.id,
+            expectedRevision: rule?.revision,
+          );
     }
   }
 
@@ -279,12 +306,60 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
     BudgetSnapshot snapshot,
     RecurringExpenseRule rule,
   ) async {
-    final result = await showDatePicker(
-      context: context,
-      initialDate: DateTime(_month.year, _month.month, 1),
-      firstDate: DateTime(_month.year, _month.month, 1),
-      lastDate: DateTime(_month.year, _month.month + 1, 0),
-    );
+    final budget = snapshot.budget;
+    if (budget == null || budget.currency.code != rule.currency.code) {
+      _showMessage(
+        'Create a budget in ${rule.currency.code} to record this schedule.',
+      );
+      return;
+    }
+    final first = DateTime(_month.year, _month.month, 1);
+    final monthEnd = DateTime(_month.year, _month.month + 1, 0);
+    final today = DateTime.now();
+    final last = monthEnd.isAfter(today) ? today : monthEnd;
+    if (last.isBefore(first)) {
+      _showMessage('This month’s occurrence cannot be recorded yet.');
+      return;
+    }
+    final recorded = snapshot.recurringOccurrences
+        .where((item) => item.ruleId == rule.id)
+        .map((item) => item.date)
+        .toSet();
+    final due = rule
+        .occurrencesBetween(first, last)
+        .where((date) => !recorded.contains(date))
+        .toList(growable: false);
+    if (due.isEmpty) {
+      _showMessage(
+        'There are no unrecorded scheduled occurrences for this month.',
+      );
+      return;
+    }
+    final result = due.length == 1
+        ? due.single
+        : await showDialog<DateTime>(
+            context: context,
+            builder: (context) => AlertDialog(
+              scrollable: true,
+              title: const Text('Choose an occurrence'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final date in due)
+                    ListTile(
+                      title: Text(_dateLabel(date)),
+                      onTap: () => Navigator.pop(context, date),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          );
     if (result != null && mounted) {
       await ref
           .read(budgetControllerProvider.notifier)
@@ -293,27 +368,74 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   }
 
   Future<void> _deleteExpense(CoupleExpense expense) async {
-    final confirmed = await showDialog<bool>(
+    final action = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete this expense?'),
         content: const Text(
-          'This removes the shared expense and its recorded split.',
+          'Ordinary deletion reverses the current amount in the minimized audit. Privacy removal hides the expense and receipts immediately, cannot be undone, and queues primary-copy cleanup with a 24-hour target.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context, 'cancel'),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context, 'privacy'),
+            child: const Text('Remove for privacy'),
+          ),
+          if (expense.description.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'description'),
+              child: const Text('Remove description only'),
+            ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(context, 'ordinary'),
+            child: const Text('Delete expense'),
           ),
         ],
       ),
     );
-    if (confirmed == true && mounted) {
+    if (action == 'ordinary' && mounted) {
       await ref.read(budgetControllerProvider.notifier).deleteExpense(expense);
+    } else if ((action == 'privacy' || action == 'description') && mounted) {
+      final repository = ref.read(authRepositoryProvider);
+      try {
+        if (repository is! PrivacyRemovalRepository) {
+          throw const AuthFailure(AuthProblem.lifecycleUnavailable);
+        }
+        await (repository as PrivacyRemovalRepository).requestPrivacyRemoval(
+          table: 'couple_expenses',
+          recordId: expense.id,
+          field: action == 'description' ? 'description' : null,
+          removeRecord: action == 'privacy',
+        );
+        final budget = ref.read(budgetControllerProvider);
+        final couple = ref
+            .read(authControllerProvider)
+            .context
+            ?.spaces
+            .where((space) => space.state == 'paired')
+            .firstOrNull;
+        if (couple != null && budget.month != null) {
+          await ref
+              .read(budgetControllerProvider.notifier)
+              .load(couple.id, budget.month!);
+        }
+        if (mounted) {
+          _showMessage(
+            action == 'privacy'
+                ? 'Expense hidden; removal cleanup is queued.'
+                : 'The expense description was removed.',
+          );
+        }
+      } on AuthFailure catch (error) {
+        if (mounted) _showMessage(error.message);
+      } catch (_) {
+        if (mounted) {
+          _showMessage('The privacy request could not be submitted.');
+        }
+      }
     }
   }
 
@@ -753,10 +875,14 @@ class _RecurringSection extends StatelessWidget {
   const _RecurringSection({
     required this.snapshot,
     required this.onAdd,
+    required this.onEdit,
+    required this.onToggleActive,
     required this.onRecord,
   });
   final BudgetSnapshot snapshot;
   final VoidCallback onAdd;
+  final ValueChanged<RecurringExpenseRule> onEdit;
+  final ValueChanged<RecurringExpenseRule> onToggleActive;
   final ValueChanged<RecurringExpenseRule> onRecord;
   @override
   Widget build(BuildContext context) => SurfaceCard(
@@ -786,12 +912,42 @@ class _RecurringSection extends StatelessWidget {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(rule.title),
-            subtitle: Text(
-              '${rule.frequency} · ${rule.category.label} · ${ExactMoney(rule.amountMinor, rule.currency).format()}',
+            subtitle: Builder(
+              builder: (context) {
+                final recorded = snapshot.recurringOccurrences
+                    .where((item) => item.ruleId == rule.id)
+                    .map((item) => item.date);
+                final next = rule.nextUnrecordedOccurrence(recorded);
+                final nextLabel = next == null
+                    ? ' · Schedule ended'
+                    : ' · Next ${_dateLabel(next)}';
+                return Text(
+                  '${rule.frequency} · ${rule.category.label} · ${ExactMoney(rule.amountMinor, rule.currency).format()} · ${rule.active ? 'Active' : 'Paused'}$nextLabel',
+                );
+              },
             ),
-            trailing: TextButton(
-              onPressed: () => onRecord(rule),
-              child: const Text('Record'),
+            trailing: Wrap(
+              spacing: 0,
+              children: [
+                IconButton(
+                  tooltip: 'Edit schedule',
+                  onPressed: () => onEdit(rule),
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+                IconButton(
+                  tooltip: rule.active ? 'Pause schedule' : 'Resume schedule',
+                  onPressed: () => onToggleActive(rule),
+                  icon: Icon(
+                    rule.active
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                  ),
+                ),
+                TextButton(
+                  onPressed: rule.active ? () => onRecord(rule) : null,
+                  child: const Text('Record'),
+                ),
+              ],
             ),
           ),
       ],
@@ -860,6 +1016,7 @@ class _ExpenseHistory extends StatelessWidget {
               SizedBox(
                 width: 220,
                 child: DropdownButtonFormField<BudgetCategory?>(
+                  isExpanded: true,
                   initialValue: category,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: [
@@ -1009,6 +1166,7 @@ class _ExpenseFormDialogState extends State<_ExpenseFormDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: Text(widget.expense == null ? 'Add expense' : 'Edit expense'),
     content: SizedBox(
       width: 480,
@@ -1037,6 +1195,13 @@ class _ExpenseFormDialogState extends State<_ExpenseFormDialog> {
               ),
               decoration: InputDecoration(
                 labelText: 'Amount (${widget.currency.code})',
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Enter digits with a period for the currency’s fractional units. No symbols or separators.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
             const SizedBox(height: 12),
@@ -1171,88 +1336,236 @@ class _ExpenseFormDialogState extends State<_ExpenseFormDialog> {
 }
 
 class _RecurringFormDialog extends StatefulWidget {
-  const _RecurringFormDialog({required this.currency, required this.members});
+  const _RecurringFormDialog({
+    required this.currency,
+    required this.members,
+    this.rule,
+  });
   final CurrencyUnit currency;
   final List<BudgetMember> members;
+  final RecurringExpenseRule? rule;
   @override
   State<_RecurringFormDialog> createState() => _RecurringFormDialogState();
 }
 
 class _RecurringFormDialogState extends State<_RecurringFormDialog> {
-  final _title = TextEditingController();
-  final _amount = TextEditingController();
-  late String _paidBy = widget.members.first.userId;
-  String _frequency = 'monthly';
-  BudgetCategory _category = BudgetCategory.other;
+  late final TextEditingController _title;
+  late final TextEditingController _description;
+  late final TextEditingController _amount;
+  late final TextEditingController _splitA;
+  late final TextEditingController _splitB;
+  late String _paidBy;
+  late DateTime _startsOn;
+  DateTime? _endsOn;
+  late String _frequency;
+  late String _splitMode;
+  late BudgetCategory _category;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final rule = widget.rule;
+    _title = TextEditingController(text: rule?.title ?? '');
+    _description = TextEditingController(text: rule?.description ?? '');
+    _amount = TextEditingController(
+      text: rule == null
+          ? ''
+          : ExactMoney(
+              rule.amountMinor,
+              widget.currency,
+            ).format().split(' ').first,
+    );
+    final firstMember = widget.members[0];
+    final secondMember = widget.members[1];
+    _splitA = TextEditingController(
+      text: rule == null
+          ? ''
+          : ExactMoney(
+              rule.splitAUserId == firstMember.userId
+                  ? rule.splitAMinor
+                  : rule.splitBMinor,
+              widget.currency,
+            ).format().split(' ').first,
+    );
+    _splitB = TextEditingController(
+      text: rule == null
+          ? ''
+          : ExactMoney(
+              rule.splitBUserId == secondMember.userId
+                  ? rule.splitBMinor
+                  : rule.splitAMinor,
+              widget.currency,
+            ).format().split(' ').first,
+    );
+    _paidBy = rule?.paidByUser ?? firstMember.userId;
+    _startsOn = rule?.startsOn ?? DateTime.now();
+    _endsOn = rule?.endsOn;
+    _frequency = rule?.frequency ?? 'monthly';
+    _category = rule?.category ?? BudgetCategory.other;
+    final firstShare = rule == null
+        ? null
+        : (rule.splitAUserId == firstMember.userId
+              ? rule.splitAMinor
+              : rule.splitBMinor);
+    final amount = rule?.amountMinor;
+    _splitMode =
+        amount != null &&
+            firstShare == amount ~/ 2 &&
+            amount - firstShare! == amount - amount ~/ 2
+        ? 'equal'
+        : 'custom';
+  }
+
   @override
   void dispose() {
     _title.dispose();
+    _description.dispose();
     _amount.dispose();
+    _splitA.dispose();
+    _splitB.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Recurring expense schedule'),
+    scrollable: true,
+    title: Text(
+      widget.rule == null ? 'Recurring expense schedule' : 'Edit schedule',
+    ),
     content: SizedBox(
       width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            'A schedule is not recorded spending. Record each occurrence when it happens; duplicate dates are rejected.',
-          ),
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Title'),
-          ),
-          TextField(
-            controller: _amount,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: 'Amount (${widget.currency.code})',
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'A schedule is not recorded spending. An occurrence is added to the budget only when you record it. Dates use the start date as their calendar anchor; monthly and yearly dates fall on the last day when the anchor day does not exist. End dates are inclusive.',
             ),
-          ),
-          DropdownButtonFormField<BudgetCategory>(
-            initialValue: _category,
-            decoration: const InputDecoration(labelText: 'Category'),
-            items: [
-              for (final item in BudgetCategory.values)
-                DropdownMenuItem(value: item, child: Text(item.label)),
-            ],
-            onChanged: (value) =>
-                setState(() => _category = value ?? _category),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: _frequency,
-            decoration: const InputDecoration(labelText: 'Frequency'),
-            items: const [
-              DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-              DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-              DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
-            ],
-            onChanged: (value) =>
-                setState(() => _frequency = value ?? 'monthly'),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: _paidBy,
-            decoration: const InputDecoration(labelText: 'Usually paid by'),
-            items: [
-              for (final member in widget.members)
-                DropdownMenuItem(
-                  value: member.userId,
-                  child: Text(member.label),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _title,
+              maxLength: 160,
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
+            TextField(
+              controller: _description,
+              maxLength: 2000,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Description (optional)',
+              ),
+            ),
+            TextField(
+              controller: _amount,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Amount (${widget.currency.code})',
+              ),
+            ),
+            DropdownButtonFormField<BudgetCategory>(
+              initialValue: _category,
+              decoration: const InputDecoration(labelText: 'Category'),
+              items: [
+                for (final item in BudgetCategory.values)
+                  DropdownMenuItem(value: item, child: Text(item.label)),
+              ],
+              onChanged: (value) =>
+                  setState(() => _category = value ?? _category),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _frequency,
+              decoration: const InputDecoration(labelText: 'Frequency'),
+              items: const [
+                DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+              ],
+              onChanged: (value) =>
+                  setState(() => _frequency = value ?? _frequency),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _paidBy,
+              decoration: const InputDecoration(labelText: 'Usually paid by'),
+              items: [
+                for (final member in widget.members)
+                  DropdownMenuItem(
+                    value: member.userId,
+                    child: Text(member.label),
+                  ),
+              ],
+              onChanged: (value) => setState(() => _paidBy = value ?? _paidBy),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: _splitMode,
+              decoration: const InputDecoration(labelText: 'Split'),
+              items: const [
+                DropdownMenuItem(value: 'equal', child: Text('Equal split')),
+                DropdownMenuItem(value: 'custom', child: Text('Custom split')),
+              ],
+              onChanged: (value) =>
+                  setState(() => _splitMode = value ?? _splitMode),
+            ),
+            if (_splitMode == 'custom') ...[
+              TextField(
+                controller: _splitA,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
                 ),
+                decoration: InputDecoration(
+                  labelText: '${widget.members[0].label} share',
+                ),
+              ),
+              TextField(
+                controller: _splitB,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: '${widget.members[1].label} share',
+                ),
+              ),
             ],
-            onChanged: (value) => setState(() => _paidBy = value ?? _paidBy),
-          ),
-          if (_error != null)
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  TextButton.icon(
+                    onPressed: _chooseStart,
+                    icon: const Icon(Icons.calendar_today_outlined),
+                    label: Text('Starts ${_dateLabel(_startsOn)}'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _chooseEnd,
+                    icon: const Icon(Icons.event_outlined),
+                    label: Text(
+                      _endsOn == null
+                          ? 'No end date'
+                          : 'Ends ${_dateLabel(_endsOn!)}',
+                    ),
+                  ),
+                  if (_endsOn != null)
+                    TextButton(
+                      onPressed: () => setState(() => _endsOn = null),
+                      child: const Text('Clear end date'),
+                    ),
+                ],
+              ),
             ),
-        ],
+            if (_error != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
       ),
     ),
     actions: [
@@ -1260,32 +1573,81 @@ class _RecurringFormDialogState extends State<_RecurringFormDialog> {
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(onPressed: _save, child: const Text('Save schedule')),
+      FilledButton(
+        onPressed: _save,
+        child: Text(widget.rule == null ? 'Save schedule' : 'Save changes'),
+      ),
     ],
   );
+
+  Future<void> _chooseStart() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _startsOn,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      setState(() {
+        _startsOn = picked;
+        if (_endsOn != null && _endsOn!.isBefore(picked)) _endsOn = picked;
+      });
+    }
+  }
+
+  Future<void> _chooseEnd() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _endsOn ?? _startsOn,
+      firstDate: _startsOn,
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) setState(() => _endsOn = picked);
+  }
+
   void _save() {
     final amount = ExactMoney.parse(_amount.text, widget.currency);
     final title = _title.text.trim();
-    if (amount == null || title.isEmpty) {
-      setState(() => _error = 'Add a title and valid amount.');
+    if (amount == null || title.isEmpty || title.length > 160) {
+      setState(() => _error = 'Add a title and valid exact amount.');
       return;
     }
-    final a = amount ~/ 2;
+    if (_endsOn != null && _endsOn!.isBefore(_startsOn)) {
+      setState(
+        () => _error = 'The end date must be on or after the start date.',
+      );
+      return;
+    }
+    final split = ExpenseSplit.parse(
+      totalMinor: amount,
+      currency: widget.currency,
+      equal: _splitMode == 'equal',
+      first: _splitA.text,
+      second: _splitB.text,
+    );
+    if (split == null) {
+      setState(
+        () =>
+            _error = 'The two exact shares must add up to the schedule amount.',
+      );
+      return;
+    }
     Navigator.pop(context, <String, dynamic>{
       'title': title,
-      'description': '',
+      'description': _description.text.trim(),
       'amount_minor': amount,
       'currency_code': widget.currency.code,
       'currency_exponent': widget.currency.exponent,
       'category_key': _category.key,
       'paid_by_user': _paidBy,
       'split_a_user_id': widget.members[0].userId,
-      'split_a_minor': a,
+      'split_a_minor': split.firstMinor,
       'split_b_user_id': widget.members[1].userId,
-      'split_b_minor': amount - a,
+      'split_b_minor': split.secondMinor,
       'frequency': _frequency,
-      'starts_on': _dateKey(DateTime.now()),
-      'active': true,
+      'starts_on': _dateKey(_startsOn),
+      'ends_on': _endsOn == null ? null : _dateKey(_endsOn!),
+      'active': widget.rule?.active ?? true,
     });
   }
 }
@@ -1317,6 +1679,7 @@ class _BudgetFormDialogState extends State<_BudgetFormDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: Text(
       widget.initialLimit.isEmpty
           ? 'Create monthly budget'
@@ -1373,12 +1736,12 @@ class _BudgetFormDialogState extends State<_BudgetFormDialog> {
       setState(() => _error = 'Enter a monthly limit.');
       return;
     }
-    final value = ExactMoney.parse(_limit.text, _currency);
-    if (value == null && _limit.text.trim() != '0') {
+    final value = ExactMoney.parse(_limit.text, _currency, allowZero: true);
+    if (value == null) {
       setState(() => _error = 'Enter an exact valid amount.');
       return;
     }
-    Navigator.pop(context, (currency: _currency, limit: value ?? 0));
+    Navigator.pop(context, (currency: _currency, limit: value));
   }
 }
 

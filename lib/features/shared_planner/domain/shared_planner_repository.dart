@@ -11,6 +11,45 @@ enum PlannerBucketCategory {
   final String label;
 }
 
+class RecoverableSharedRecord {
+  const RecoverableSharedRecord({
+    required this.table,
+    required this.id,
+    required this.deletedAt,
+    required this.restoreUntil,
+  });
+
+  final String table;
+  final String id;
+  final DateTime deletedAt;
+  final DateTime restoreUntil;
+
+  String get label => switch (table) {
+    'bucket_list_items' => 'Bucket List item',
+    'important_dates' => 'Important Date',
+    'plans' => 'Plan and checklist',
+    'plan_tasks' => 'Plan task',
+    'couple_memories' => 'Memory',
+    'date_night_ideas' => 'Date Night idea',
+    'shared_goals' => 'Shared Goal and milestones',
+    'shared_goal_milestones' => 'Goal milestone',
+    _ => 'Shared item',
+  };
+
+  factory RecoverableSharedRecord.fromJson(Map<String, dynamic> json) =>
+      RecoverableSharedRecord(
+        table: json['target_table'] as String,
+        id: json['target_id'] as String,
+        deletedAt: DateTime.parse(json['deleted_at'] as String),
+        restoreUntil: DateTime.parse(json['restore_until'] as String),
+      );
+}
+
+abstract interface class SharedContentRecoveryRepository {
+  Future<List<RecoverableSharedRecord>> listRecoverableSharedRecords();
+  Future<bool> restoreSharedRecord(RecoverableSharedRecord record);
+}
+
 enum ImportantDateKind { birthday, anniversary, special }
 
 enum AnnualLeapDayPolicy {

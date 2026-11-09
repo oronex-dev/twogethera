@@ -13,6 +13,7 @@ fi
 
 : "${APP_ENV:?Set APP_ENV to staging or production in Vercel.}"
 : "${SUPABASE_URL:?Set SUPABASE_URL in Vercel.}"
+: "${SUPABASE_PROJECT_REF:?Set the approved Supabase project reference in Vercel.}"
 : "${SUPABASE_PUBLISHABLE_KEY:?Set the client publishable key in Vercel.}"
 : "${APP_WEB_URL:?Set the HTTPS app origin in Vercel.}"
 
@@ -115,5 +116,10 @@ fi
 flutter build web --release --base-href / \
   --dart-define="APP_ENV=$APP_ENV" \
   --dart-define="SUPABASE_URL=$SUPABASE_URL" \
+  --dart-define="SUPABASE_PROJECT_REF=$SUPABASE_PROJECT_REF" \
   --dart-define="SUPABASE_PUBLISHABLE_KEY=$SUPABASE_PUBLISHABLE_KEY" \
   --dart-define="APP_WEB_URL=$APP_WEB_URL"
+
+# The beta does not support offline app data; the bootstrap unregisters any
+# prior worker and new releases must not publish Flutter's offline precache map.
+rm -f build/web/flutter_service_worker.js

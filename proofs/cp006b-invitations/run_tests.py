@@ -148,7 +148,8 @@ class Suite:
 
     def create_user(self, name):
         email = f"cp006b-{self.run_id}-{name}@example.invalid"
-        password = secrets.token_urlsafe(30)
+        # Local Auth enforces the shared application password categories.
+        password = "A" + secrets.token_hex(24) + "a1!"
         code, data = http(API + "/auth/v1/admin/users", "POST",
                           {"email": email, "password": password, "email_confirm": True},
                           {"apikey": self.anon, "Authorization": "Bearer " + self.admin})

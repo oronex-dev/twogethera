@@ -4,7 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/config/supabase_runtime_config.dart';
 import '../application/auth_controller.dart';
+import '../domain/password_policy.dart';
 import '../../profile/presentation/profile_sections.dart';
+import '../../legal/presentation/legal_document_screen.dart';
+import '../../shared_planner/domain/shared_planner_repository.dart';
 import 'auth_components.dart';
 
 class AuthWelcomeScreen extends ConsumerWidget {
@@ -145,7 +148,7 @@ class _LocalAuthScreenState extends ConsumerState<LocalAuthScreen> {
                 const Padding(
                   padding: EdgeInsets.only(top: 16),
                   child: Text(
-                    'Authentication is not configured for this build. Contact the app administrator.',
+                    'Local authentication is not enabled for this debug build. Check APP_ENV, LOCAL_AUTH_ENABLED, LOCAL_SUPABASE_URL, and LOCAL_SUPABASE_ANON_KEY, then restart the app.',
                   ),
                 ),
               AuthFeedback(state: state),
@@ -185,6 +188,8 @@ class LocalAccountScreen extends ConsumerWidget {
     final account = state.phase == AuthPhase.authenticated
         ? state.context
         : null;
+    final hasPairedSpace =
+        account?.spaces.any((space) => space.state == 'paired') ?? false;
     return AuthFrame(
       title: 'A space for you.',
       description: 'Your account, with a little peace of mind.',
@@ -227,6 +232,58 @@ class LocalAccountScreen extends ConsumerWidget {
                   : 'Link with your partner to open your shared planner.',
             ),
             const SizedBox(height: 24),
+            if (!isDevelopment && hasPairedSpace) ...[
+              OutlinedButton(
+                onPressed: state.lifecycleBusy
+                    ? null
+                    : () async {
+                        final confirmed = await _confirmLifecycleAction(
+                          context,
+                          title: 'Close the shared space for both partners?',
+                          detail: 'Both partners immediately lose server access. There is no survivor archive or replacement partner. The primary-copy purge target is 30 days; minimized financial audit fields have a 90-day target. Previously downloaded copies cannot be remotely erased.',
+                          phrase: 'CLOSE',
+                          actionLabel: 'Close for both',
+                        );
+                        if (!confirmed || !context.mounted) return;
+                        final completed = await ref
+                            .read(authControllerProvider.notifier)
+                            .closeCoupleSpace();
+                        if (completed && context.mounted) {
+                          context.go('/auth/local');
+                        }
+                      },
+                child: state.lifecycleBusy
+                    ? const Text('Closing shared space…')
+                    : const Text('Close shared space for both partners'),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (!isDevelopment) ...[
+              FilledButton.tonal(
+                onPressed: state.lifecycleBusy
+                    ? null
+                    : () async {
+                        final confirmed = await _confirmLifecycleAction(
+                          context,
+                          title: 'Delete your account?',
+                          detail: 'This closes the entire shared space and immediately removes server access for both partners. The account is not recoverable. Primary-copy nonfinancial purge targets 30 days; minimized financial audit fields have a 90-day target. Reauthentication within the last 10 minutes is required. Previously downloaded copies cannot be remotely erased.',
+                          phrase: 'DELETE',
+                          actionLabel: 'Request deletion',
+                        );
+                        if (!confirmed || !context.mounted) return;
+                        final completed = await ref
+                            .read(authControllerProvider.notifier)
+                            .deleteAccount();
+                        if (completed && context.mounted) {
+                          context.go('/auth/local');
+                        }
+                      },
+                child: state.lifecycleBusy
+                    ? const Text('Processing deletion…')
+                    : const Text('Delete account'),
+              ),
+              const SizedBox(height: 12),
+            ],
             FilledButton(
               onPressed: () =>
                   ref.read(authControllerProvider.notifier).signOut(),
@@ -247,11 +304,156 @@ class LocalAccountScreen extends ConsumerWidget {
             const Text(
               'Sign-out clears this device’s memory and requests server sign-out. Previously issued access tokens can remain valid until they expire.',
             ),
+            if (!isDevelopment) ...[
+              const SizedBox(height: 28),
+              const _RecentlyDeletedSharedRecords(),
+            ],
           ],
+          const LegalDocumentLinks(),
+          const SizedBox(height: 8),
           AuthFeedback(state: state),
         ],
       ),
     );
+  }
+}
+
+class _RecentlyDeletedSharedRecords extends ConsumerWidget {
+  const _RecentlyDeletedSharedRecords();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final records = ref.watch(recoverableSharedRecordsProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Recently deleted', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 6),
+        const Text(
+          'Ordinarily deleted shared items can be restored by either active partner for seven days. Privacy removals cannot be restored.',
+        ),
+        const SizedBox(height: 12),
+        records.when(
+          loading: () => const LinearProgressIndicator(),
+          error: (_, _) => const Text(
+            'Recently deleted items could not be loaded. Try refreshing your account.',
+          ),
+          data: (items) => items.isEmpty
+              ? const Text('There are no items available to restore.')
+              : Column(
+                  children: [
+                    for (final item in items)
+                      _RecoverableRecordTile(record: item),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecoverableRecordTile extends ConsumerStatefulWidget {
+  const _RecoverableRecordTile({required this.record});
+  final RecoverableSharedRecord record;
+
+  @override
+  ConsumerState<_RecoverableRecordTile> createState() =>
+      _RecoverableRecordTileState();
+}
+
+class _RecoverableRecordTileState
+    extends ConsumerState<_RecoverableRecordTile> {
+  bool _busy = false;
+
+  Future<void> _restore() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    var restored = false;
+    try {
+      final repository = ref.read(authRepositoryProvider);
+      if (repository is SharedContentRecoveryRepository) {
+        restored = await (repository as SharedContentRecoveryRepository)
+            .restoreSharedRecord(widget.record);
+      }
+    } catch (_) {
+      restored = false;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ref.invalidate(recoverableSharedRecordsProvider);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          restored ? '${widget.record.label} restored.' : 'This item could not be restored. It may have expired or the shared space may be closed.',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    leading: const Icon(Icons.restore_rounded),
+    title: Text(widget.record.label),
+    subtitle: Text(
+      'Available until ${MaterialLocalizations.of(context).formatMediumDate(widget.record.restoreUntil.toLocal())}',
+    ),
+    trailing: TextButton(
+      onPressed: _busy ? null : _restore,
+      child: Text(_busy ? 'Restoring…' : 'Restore'),
+    ),
+  );
+}
+
+Future<bool> _confirmLifecycleAction(
+  BuildContext context, {
+  required String title,
+  required String detail,
+  required String phrase,
+  required String actionLabel,
+}) async {
+  final controller = TextEditingController();
+  try {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => StatefulBuilder(
+            builder: (context, setState) => AlertDialog(
+              title: Text(title),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(detail),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: 'Type $phrase to confirm',
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: controller.text == phrase
+                      ? () => Navigator.of(dialogContext).pop(true)
+                      : null,
+                  child: Text(actionLabel),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+  } finally {
+    controller.dispose();
   }
 }
 
@@ -278,6 +480,26 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
   final _confirmation = TextEditingController();
   final _link = TextEditingController();
   bool _submitting = false;
+
+  void _handleInputChanged(String _) {
+    if (mounted) setState(() {});
+  }
+
+  bool _validDisplayName() {
+    final length = _name.text.trim().length;
+    return length >= 2 && length <= 64;
+  }
+
+  bool _validPasswordPair() =>
+      evaluatePassword(_password.text).isComplete &&
+      _confirmation.text.isNotEmpty &&
+      _confirmation.text == _password.text;
+
+  bool _validRegistration(bool localOnly) =>
+      _validDisplayName() &&
+      validateAccountEmail(_email.text, localOnly: localOnly) == null &&
+      _validPasswordPair();
+
   Future<void> _back() async {
     final phase = ref.read(authControllerProvider).phase;
     if ({
@@ -311,11 +533,17 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
     final controller = ref.read(authControllerProvider.notifier);
     final ready =
         ref.read(authControllerProvider).phase == AuthPhase.recovering;
+    final registration = widget.registration && !ready && !link && !resend;
     final password = _password.text;
     final url = _link.text;
-    _password.clear();
-    _confirmation.clear();
-    _link.clear();
+    // Retain registration input if Auth rejects the request so the user can
+    // correct/retry it. Other credential operations keep their previous
+    // clear-before-request behavior.
+    if (!registration) {
+      _password.clear();
+      _confirmation.clear();
+      _link.clear();
+    }
     try {
       if (link) {
         await controller.verifyLink(url, recovery: widget.recovery);
@@ -323,7 +551,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
         await controller.updatePassword(password);
       } else if (resend) {
         await controller.resendVerification(_email.text);
-      } else if (widget.registration) {
+      } else if (registration) {
         await controller.register(
           _email.text,
           password,
@@ -332,6 +560,8 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
         if (mounted &&
             ref.read(authControllerProvider).phase ==
                 AuthPhase.awaitingConfirmation) {
+          _password.clear();
+          _confirmation.clear();
           context.go('/auth/verify');
         }
       } else {
@@ -339,11 +569,20 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
       }
     } finally {
       _submitting = false;
+      if (mounted) setState(() {});
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (widget.registration) {
+      return AuthFrame(
+        title: 'Private beta access',
+        description: 'New account registration is closed. This beta is limited to the two existing partner accounts.',
+        onBack: () => context.go('/auth/local'),
+        child: const SizedBox.shrink(),
+      );
+    }
     final state = ref.watch(authControllerProvider);
     final config = ref.watch(supabaseRuntimeConfigProvider);
     final busy =
@@ -353,6 +592,9 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
     final ready = widget.recovery && state.phase == AuthPhase.recovering;
     final registration = widget.registration;
     final verification = !registration && !widget.recovery;
+    final localOnly = config?.isDevelopment ?? true;
+    final registrationReady = registration && _validRegistration(localOnly);
+    final passwordUpdateReady = ready && _validPasswordPair();
     return AuthFrame(
       title: ready
           ? 'A fresh start.'
@@ -370,7 +612,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
           : registration
           ? 'We’ll send a confirmation link to your email. Confirm it to finish creating your account.'
           : config?.isDevelopment == true
-          ? 'Open the local development mailbox and use the newest confirmation link. Expired or used links cannot be reused.'
+          ? 'Open local Mailpit at http://127.0.0.1:54324 and paste the newest confirmation link below. Expired or used links cannot be reused.'
           : 'Open the newest confirmation link in your email. Expired or used links cannot be reused.',
       onBack: _back,
       child: AutofillGroup(
@@ -380,7 +622,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
           children: [
             if (!configured)
               const Text(
-                'Authentication is not configured for this build. Contact the app administrator.',
+                'Local authentication is not enabled for this debug build. Check APP_ENV, LOCAL_AUTH_ENABLED, LOCAL_SUPABASE_URL, and LOCAL_SUPABASE_ANON_KEY, then restart the app.',
               ),
             Form(
               key: _form,
@@ -394,6 +636,8 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
                       enabled: enabled,
                       textCapitalization: TextCapitalization.words,
                       textInputAction: TextInputAction.next,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                      onChanged: _handleInputChanged,
                       autofillHints: null,
                       enableIMEPersonalizedLearning: false,
                       validator: (value) =>
@@ -414,6 +658,7 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
                       fieldKey: 'lifecycle-email',
                       enabled: enabled,
                       localOnly: config?.isDevelopment ?? true,
+                      onChanged: _handleInputChanged,
                     ),
                     const SizedBox(height: 16),
                   ],
@@ -425,10 +670,8 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
                       enabled: enabled,
                       action: TextInputAction.next,
                       validator: validateNewPassword,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Use at least 16 characters. A memorable phrase works well.',
+                      showRequirements: true,
+                      onChanged: _handleInputChanged,
                     ),
                     const SizedBox(height: 16),
                     AuthPasswordField(
@@ -440,12 +683,36 @@ class _LocalLifecycleScreenState extends ConsumerState<LocalLifecycleScreen> {
                           value != _password.text || (value?.isEmpty ?? true)
                           ? 'Your passwords need to match.'
                           : null,
+                      onChanged: _handleInputChanged,
                       onSubmitted: enabled ? _submit : null,
                     ),
+                    if (_confirmation.text.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      AnimatedSwitcher(
+                        duration: MediaQuery.disableAnimationsOf(context)
+                            ? Duration.zero
+                            : const Duration(milliseconds: 160),
+                        child: Text(
+                          _confirmation.text == _password.text
+                              ? 'Passwords match.'
+                              : 'Your passwords need to match.',
+                          key: ValueKey(_confirmation.text == _password.text),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: _confirmation.text == _password.text
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context).colorScheme.error,
+                              ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                   ],
                   FilledButton(
-                    onPressed: !enabled
+                    onPressed:
+                        !enabled ||
+                            (registration && !registrationReady) ||
+                            (ready && !passwordUpdateReady)
                         ? null
                         : () => _submit(resend: verification),
                     child: Text(

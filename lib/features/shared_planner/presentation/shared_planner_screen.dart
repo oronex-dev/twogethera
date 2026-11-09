@@ -8,6 +8,7 @@ import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
 import '../../authentication/application/auth_controller.dart';
+import '../../authentication/domain/auth_repository.dart';
 import '../application/shared_planner_controller.dart';
 import '../domain/shared_planner_repository.dart';
 
@@ -423,6 +424,21 @@ class _BucketListTab extends ConsumerWidget {
                           onDelete: () => ref
                               .read(sharedPlannerControllerProvider.notifier)
                               .deleteBucket(item),
+                          onPrivacyRemove: () => _requestPrivacyRemoval(
+                            ref,
+                            table: 'bucket_list_items',
+                            recordId: item.id,
+                          ),
+                          privacyFields: {
+                            if (item.description.isNotEmpty)
+                              'description': () => _requestPrivacyRemoval(
+                                ref,
+                                table: 'bucket_list_items',
+                                recordId: item.id,
+                                field: 'description',
+                                removeRecord: false,
+                              ),
+                          },
                         ),
                         icon: const Icon(Icons.delete_outline_rounded),
                       ),
@@ -553,6 +569,21 @@ class _ImportantDatesTab extends ConsumerWidget {
                                     sharedPlannerControllerProvider.notifier,
                                   )
                                   .deleteImportantDate(entry),
+                              onPrivacyRemove: () => _requestPrivacyRemoval(
+                                ref,
+                                table: 'important_dates',
+                                recordId: entry.id,
+                              ),
+                              privacyFields: {
+                                if (entry.notes.isNotEmpty)
+                                  'notes': () => _requestPrivacyRemoval(
+                                    ref,
+                                    table: 'important_dates',
+                                    recordId: entry.id,
+                                    field: 'notes',
+                                    removeRecord: false,
+                                  ),
+                              },
                             ),
                             icon: const Icon(Icons.delete_outline_rounded),
                           ),
@@ -646,6 +677,30 @@ class _PlansTab extends ConsumerWidget {
                                             .notifier,
                                       )
                                       .deletePlan(plan),
+                                  onPrivacyRemove: () => _requestPrivacyRemoval(
+                                    ref,
+                                    table: 'plans',
+                                    recordId: plan.id,
+                                  ),
+                                  privacyFields: {
+                                    if (plan.description.isNotEmpty)
+                                      'description': () =>
+                                          _requestPrivacyRemoval(
+                                            ref,
+                                            table: 'plans',
+                                            recordId: plan.id,
+                                            field: 'description',
+                                            removeRecord: false,
+                                          ),
+                                    if (plan.location.isNotEmpty)
+                                      'location': () => _requestPrivacyRemoval(
+                                        ref,
+                                        table: 'plans',
+                                        recordId: plan.id,
+                                        field: 'location',
+                                        removeRecord: false,
+                                      ),
+                                  },
                                 ),
                                 icon: const Icon(Icons.delete_outline_rounded),
                               ),
@@ -692,6 +747,12 @@ class _PlansTab extends ConsumerWidget {
                                                 .notifier,
                                           )
                                           .deleteTask(task),
+                                      onPrivacyRemove: () =>
+                                          _requestPrivacyRemoval(
+                                            ref,
+                                            table: 'plan_tasks',
+                                            recordId: task.id,
+                                          ),
                                     ),
                                     icon: const Icon(Icons.close_rounded),
                                   ),
@@ -1398,27 +1459,56 @@ Future<void> _confirmDelete(
   BuildContext context, {
   required String title,
   required Future<bool> Function() onDelete,
+  required Future<String?> Function() onPrivacyRemove,
+  Map<String, Future<String?> Function()> privacyFields = const {},
 }) async {
-  final confirm = await _showDialogAndWaitForClose<bool>(
+  final action = await _showDialogAndWaitForClose<String>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
       content: const Text(
-        'This removes the item from the shared planner for both partners.',
+        'Ordinary deletion hides the item for both partners and allows either active partner to restore it for seven days. “Remove for privacy” hides it immediately, cannot be undone, and queues primary-copy cleanup with a 24-hour target.',
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(context, 'cancel'),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Delete'),
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context, 'privacy'),
+          child: const Text('Remove for privacy'),
+        ),
+        for (final entry in privacyFields.entries)
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'field:${entry.key}'),
+            child: Text('Remove ${entry.key} only'),
+          ),
+        FilledButton.tonal(
+          onPressed: () => Navigator.pop(context, 'ordinary'),
+          child: const Text('Delete for 7 days'),
         ),
       ],
     ),
   );
-  if (confirm != true) return;
+  if (action == null || action == 'cancel') return;
+  if (action == 'privacy' || action.startsWith('field:')) {
+    final field = action.startsWith('field:')
+        ? action.substring('field:'.length)
+        : null;
+    final result = field == null
+        ? await onPrivacyRemove()
+        : await privacyFields[field]?.call();
+    if (context.mounted) {
+      _toast(
+        context,
+        result ??
+            (field == null
+                ? 'Content hidden. Primary-copy cleanup is queued.'
+                : 'The selected text field was removed.'),
+      );
+    }
+    return;
+  }
   final success = await onDelete();
   if (context.mounted) {
     _toast(
@@ -1427,6 +1517,41 @@ Future<void> _confirmDelete(
           ? 'Item deleted.'
           : 'Could not delete the item. Refresh and try again.',
     );
+  }
+}
+
+Future<String?> _requestPrivacyRemoval(
+  WidgetRef ref, {
+  required String table,
+  required String recordId,
+  String? field,
+  bool removeRecord = true,
+}) async {
+  final repository = ref.read(authRepositoryProvider);
+  if (repository is! PrivacyRemovalRepository) {
+    return AuthFailure(AuthProblem.lifecycleUnavailable).message;
+  }
+  try {
+    await (repository as PrivacyRemovalRepository).requestPrivacyRemoval(
+      table: table,
+      recordId: recordId,
+      field: field,
+      removeRecord: removeRecord,
+    );
+    final couple = ref
+        .read(authControllerProvider)
+        .context
+        ?.spaces
+        .where((space) => space.state == 'paired')
+        .firstOrNull;
+    if (couple != null) {
+      await ref.read(sharedPlannerControllerProvider.notifier).load(couple.id);
+    }
+    return null;
+  } on AuthFailure catch (error) {
+    return error.message;
+  } catch (_) {
+    return AuthFailure(AuthProblem.lifecycleUnavailable).message;
   }
 }
 

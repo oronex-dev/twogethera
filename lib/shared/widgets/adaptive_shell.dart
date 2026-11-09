@@ -7,7 +7,7 @@ import '../../features/authentication/application/auth_controller.dart';
 import '../../features/shared_planner/application/shared_planner_controller.dart';
 import 'together_mark.dart';
 
-enum _UtilityDestination { memories, studio, appearance }
+enum _UtilityDestination { memories, dateNights, goals, studio, appearance }
 
 class AdaptiveShell extends ConsumerWidget {
   const AdaptiveShell({
@@ -68,6 +68,8 @@ class AdaptiveShell extends ConsumerWidget {
     '/search' => 'Search',
     '/budget' => 'Budget',
     '/memories' => 'Memories',
+    '/date-nights' => 'Date nights',
+    '/goals' => 'Shared goals',
     '/studio' => 'Design Studio',
     '/settings' => 'Appearance',
     _ => 'Summary',
@@ -96,6 +98,8 @@ class AdaptiveShell extends ConsumerWidget {
     void navigateUtility(_UtilityDestination destination) {
       context.go(switch (destination) {
         _UtilityDestination.memories => '/memories',
+        _UtilityDestination.dateNights => '/date-nights',
+        _UtilityDestination.goals => '/goals',
         _UtilityDestination.studio => '/studio',
         _UtilityDestination.appearance => '/settings',
       });
@@ -181,6 +185,14 @@ class AdaptiveShell extends ConsumerWidget {
               PopupMenuItem(
                 value: _UtilityDestination.memories,
                 child: Text('Memories'),
+              ),
+              PopupMenuItem(
+                value: _UtilityDestination.dateNights,
+                child: Text('Date nights'),
+              ),
+              PopupMenuItem(
+                value: _UtilityDestination.goals,
+                child: Text('Shared goals'),
               ),
               PopupMenuItem(
                 value: _UtilityDestination.studio,
@@ -340,6 +352,16 @@ class _Sidebar extends StatelessWidget {
           leading: const Icon(Icons.photo_library_outlined),
           title: const Text('Memories'),
           onTap: () => onSelectUtility(_UtilityDestination.memories),
+        ),
+        ListTile(
+          leading: const Icon(Icons.favorite_outline_rounded),
+          title: const Text('Date nights'),
+          onTap: () => onSelectUtility(_UtilityDestination.dateNights),
+        ),
+        ListTile(
+          leading: const Icon(Icons.flag_outlined),
+          title: const Text('Shared goals'),
+          onTap: () => onSelectUtility(_UtilityDestination.goals),
         ),
         ListTile(
           leading: const Icon(Icons.auto_awesome_outlined),

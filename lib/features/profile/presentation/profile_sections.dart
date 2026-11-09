@@ -1,10 +1,8 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../../app/theme/design_tokens.dart';
 import '../../../shared/widgets/design_components.dart';
@@ -81,51 +79,11 @@ class _ProfileSectionsState extends ConsumerState<ProfileSections> {
                 Center(
                   child: Column(
                     children: [
-                      _Avatar(
-                        bytes: state.myAvatarBytes,
-                        label: profile.displayName,
-                      ),
+                      _Avatar(bytes: null, label: profile.displayName),
                       const SizedBox(height: AppSpace.xs),
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: AppSpace.xs,
-                        children: [
-                          TextButton.icon(
-                            onPressed: state.photoBusy ? null : _choosePhoto,
-                            icon: state.photoBusy
-                                ? const SizedBox.square(
-                                    dimension: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.photo_library_outlined),
-                            label: const Text('Choose photo'),
-                          ),
-                          if (profile.avatarPath != null)
-                            TextButton(
-                              onPressed: state.photoBusy
-                                  ? null
-                                  : () => ref
-                                        .read(
-                                          profileControllerProvider.notifier,
-                                        )
-                                        .removeAvatar(),
-                              child: const Text('Remove'),
-                            ),
-                          if (profile.avatarPath == null &&
-                              state.pendingAvatarRemovalPath != null)
-                            TextButton(
-                              onPressed: state.photoBusy
-                                  ? null
-                                  : () => ref
-                                        .read(
-                                          profileControllerProvider.notifier,
-                                        )
-                                        .removeAvatar(),
-                              child: const Text('Retry photo cleanup'),
-                            ),
-                        ],
+                      const Text(
+                        'Profile photos are unavailable in this private beta while secure storage is being verified.',
+                        textAlign: TextAlign.center,
                       ),
                     ],
                   ),
@@ -191,7 +149,7 @@ class _ProfileSectionsState extends ConsumerState<ProfileSections> {
                 ),
                 const SizedBox(height: AppSpace.xs),
                 Text(
-                  'Your profile settings are personal. Only your display name and profile photo appear to your active partner.',
+                  'Your profile settings are personal. Only your display name appears to your active partner; About me stays private.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -260,72 +218,6 @@ class _ProfileSectionsState extends ConsumerState<ProfileSections> {
         .save(displayName: _displayName ?? '', about: _about ?? '');
     if (saved && mounted) {
       await ref.read(authControllerProvider.notifier).reloadContext();
-    }
-  }
-
-  Future<void> _choosePhoto() async {
-    try {
-      final picked = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        requestFullMetadata: false,
-      );
-      if (picked == null) return;
-      final source = await picked.readAsBytes();
-      if (source.isEmpty || source.length > 15 * 1024 * 1024) {
-        ref
-            .read(profileControllerProvider.notifier)
-            .showError('Choose an image smaller than 15 MB.');
-        return;
-      }
-      final png = await _sanitizePng(source);
-      if (png == null || png.length > 5 * 1024 * 1024) {
-        ref
-            .read(profileControllerProvider.notifier)
-            .showError(
-              'This image could not be safely prepared. Choose another photo.',
-            );
-        return;
-      }
-      await ref.read(profileControllerProvider.notifier).updateAvatar(png);
-    } catch (_) {
-      if (mounted) {
-        ref
-            .read(profileControllerProvider.notifier)
-            .showError('The photo could not be selected. Try another image.');
-      }
-    }
-  }
-
-  Future<Uint8List?> _sanitizePng(Uint8List source) async {
-    ui.ImmutableBuffer? buffer;
-    ui.ImageDescriptor? descriptor;
-    ui.Codec? codec;
-    ui.Image? image;
-    try {
-      buffer = await ui.ImmutableBuffer.fromUint8List(source);
-      descriptor = await ui.ImageDescriptor.encoded(buffer);
-      final ratio = (512 / descriptor.width)
-          .clamp(0, 512 / descriptor.height)
-          .toDouble();
-      final width = (descriptor.width * ratio).round().clamp(1, 512).toInt();
-      final height = (descriptor.height * ratio).round().clamp(1, 512).toInt();
-      codec = await descriptor.instantiateCodec(
-        targetWidth: width,
-        targetHeight: height,
-      );
-      image = (await codec.getNextFrame()).image;
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (data == null) return null;
-      return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
-    } catch (_) {
-      return null;
-    } finally {
-      image?.dispose();
-      codec?.dispose();
-      descriptor?.dispose();
-      buffer?.dispose();
     }
   }
 }
