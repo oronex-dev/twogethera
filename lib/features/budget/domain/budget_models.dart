@@ -445,6 +445,7 @@ class BudgetOperationFailure implements Exception {
   static BudgetOperationFailure fromPostgresCode(
     String? code, {
     bool duplicateOccurrence = false,
+    String? databaseMessage,
   }) => switch (code) {
     '23505' when duplicateOccurrence => const BudgetOperationFailure(
       'This occurrence has already been recorded.',
@@ -455,9 +456,7 @@ class BudgetOperationFailure implements Exception {
     '23514' => const BudgetOperationFailure(
       'Check the amount, currency, date, and split details, then try again.',
     ),
-    '42501' => const BudgetOperationFailure(
-      'Shared budget access is unavailable. Confirm that your couple is still linked.',
-    ),
+    '42501' => _authorizationFailure(databaseMessage),
     '23503' => const BudgetOperationFailure(
       'The related budget or schedule changed. Refresh and try again.',
     ),
@@ -465,6 +464,35 @@ class BudgetOperationFailure implements Exception {
       'We could not save that change. Check your connection and retry.',
     ),
   };
+
+  static BudgetOperationFailure _authorizationFailure(String? message) {
+    final normalized = message?.toLowerCase() ?? '';
+    if (normalized.contains('private beta access required')) {
+      return const BudgetOperationFailure(
+        'This account is not enabled for the private beta. Your budget was not changed.',
+      );
+    }
+    if (normalized.contains('active paired couple required')) {
+      return const BudgetOperationFailure(
+        'The shared space is not currently active for both partners. Refresh and try again.',
+      );
+    }
+    if (normalized.contains(
+      'expense participants must be current couple members',
+    )) {
+      return const BudgetOperationFailure(
+        'The expense split no longer matches the active partners. Refresh the budget and review the split.',
+      );
+    }
+    if (normalized.contains('row-level security')) {
+      return const BudgetOperationFailure(
+        'The database declined this change for the current account or shared space. No change was saved. Refresh and try again. (Access check 42501)',
+      );
+    }
+    return const BudgetOperationFailure(
+      'The database denied this shared budget change. No change was saved. Refresh and try again. (Access check 42501)',
+    );
+  }
 }
 
 @immutable

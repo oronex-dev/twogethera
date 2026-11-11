@@ -148,6 +148,30 @@ class AuthController extends Notifier<AuthViewState> {
   Future<void> reloadContext() =>
       _run(() => ref.read(authRepositoryProvider).accountContext());
 
+  /// Updates the display-only context from a confirmed profile save without
+  /// making an unrelated second request that could hide the saved profile.
+  void applySavedDisplayName(String userId, String displayName) {
+    final current = state;
+    final account = current.context;
+    if (current.phase != AuthPhase.authenticated ||
+        account == null ||
+        account.userId != userId) {
+      return;
+    }
+    state = AuthViewState(
+      AuthPhase.authenticated,
+      context: AccountContext(
+        userId: account.userId,
+        spaces: account.spaces,
+        displayName: displayName,
+        email: account.email,
+      ),
+      problem: current.problem,
+      notice: current.notice,
+      lifecycleBusy: current.lifecycleBusy,
+    );
+  }
+
   LifecycleAuthRepository get _lifecycle {
     final repository = ref.read(authRepositoryProvider);
     if (repository is! LifecycleAuthRepository) {

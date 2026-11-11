@@ -7,8 +7,59 @@ import '../../../shared/widgets/design_components.dart';
 import '../../../shared/widgets/responsive_page.dart';
 import '../../authentication/application/auth_controller.dart';
 import '../../authentication/domain/auth_repository.dart';
+import '../application/budget_export.dart';
 import '../application/budget_controller.dart';
 import '../domain/budget_models.dart';
+
+const _budgetParticipantDiagnosticsEnabled = bool.fromEnvironment(
+  'TWOTHERGA_BUDGET_DIAGNOSTICS',
+  defaultValue: false,
+);
+
+void _logRejectedParticipantMapping(
+  String operation,
+  List<BudgetMember> members,
+  Map<String, dynamic> values,
+) {
+  if (!_budgetParticipantDiagnosticsEnabled) return;
+
+  final seat1 = members.where((member) => member.seat == 1).toList();
+  final seat2 = members.where((member) => member.seat == 2).toList();
+  final activeMemberIds = members
+      .where((member) => member.seat == 1 || member.seat == 2)
+      .map((member) => member.userId)
+      .toSet();
+  final splitA = values['split_a_user_id'];
+  final splitB = values['split_b_user_id'];
+  final payer = values['paid_by_user'];
+  final splitAIsActive = splitA is String && activeMemberIds.contains(splitA);
+  final splitBIsActive = splitB is String && activeMemberIds.contains(splitB);
+  final participantsAreDistinct =
+      splitA is String && splitB is String && splitA != splitB;
+  final hasExactlyTwoActiveSeats =
+      members.length == 2 &&
+      activeMemberIds.length == 2 &&
+      seat1.length == 1 &&
+      seat2.length == 1;
+  final participantsAreActivePair =
+      hasExactlyTwoActiveSeats &&
+      splitAIsActive &&
+      splitBIsActive &&
+      participantsAreDistinct;
+  final payerIsActive = payer is String && activeMemberIds.contains(payer);
+  final participantsMatchSeatOrder =
+      seat1.length == 1 &&
+      seat2.length == 1 &&
+      splitA == seat1.single.userId &&
+      splitB == seat2.single.userId;
+
+  debugPrint(
+    'Twogethera Budget participant diagnostic: operation=$operation '
+    'split_a_active=$splitAIsActive split_b_active=$splitBIsActive '
+    'distinct=$participantsAreDistinct active_pair=$participantsAreActivePair '
+    'payer_active=$payerIsActive seat_ordered=$participantsMatchSeatOrder',
+  );
+}
 
 class BudgetScreen extends ConsumerStatefulWidget {
   const BudgetScreen({super.key});
@@ -22,6 +73,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   String _query = '';
   BudgetCategory? _filter;
   String? _requestedKey;
+  bool _expenseParticipantDiagnosticUsed = false;
+  bool _recurringParticipantDiagnosticUsed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -89,6 +142,17 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               _month = DateTime(_month.year, _month.month + delta);
               _requestedKey = null;
             }),
+          ),
+          const SizedBox(height: AppSpace.xs),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: snapshot?.budget == null || state.loading
+                  ? null
+                  : () => _exportBudget(snapshot!, _month),
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Export CSV'),
+            ),
           ),
           if (state.error != null)
             _BudgetNotice(
@@ -170,6 +234,21 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
         ],
       ),
     );
+  }
+
+  void _exportBudget(BudgetSnapshot snapshot, DateTime month) {
+    try {
+      final downloaded = exportBudgetCsv(snapshot, month);
+      _showMessage(
+        downloaded
+            ? 'Budget summary and expense CSV files were downloaded.'
+            : 'CSV export is available in a supported web browser.',
+      );
+    } catch (_) {
+      _showMessage(
+        'The selected month could not be exported. Refresh and retry.',
+      );
+    }
   }
 
   Future<void> _editBudget(BudgetSnapshot snapshot) async {
@@ -262,13 +341,33 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       ),
     );
     if (values == null || !mounted) return;
-    await ref
+    final diagnosticProbe =
+        _budgetParticipantDiagnosticsEnabled && expense == null;
+    if (diagnosticProbe && _expenseParticipantDiagnosticUsed) {
+      _showMessage('The one-time expense diagnostic has already run.');
+      return;
+    }
+    if (diagnosticProbe) {
+      _expenseParticipantDiagnosticUsed = true;
+      _logRejectedParticipantMapping(
+        'couple_expenses.insert',
+        snapshot.members,
+        values,
+      );
+      // The trigger runs before NOT NULL constraints. This forces the insert
+      // to fail after participant validation, even if that validation passes.
+      values['title'] = null;
+    }
+    final saved = await ref
         .read(budgetControllerProvider.notifier)
         .saveExpense(
           values,
           expenseId: expense?.id,
           expectedRevision: expense?.revision,
         );
+    if (diagnosticProbe && saved) {
+      _showMessage('Diagnostic stopped unexpectedly; do not retry.');
+    }
   }
 
   Future<void> _editRecurring(
@@ -287,13 +386,33 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       ),
     );
     if (values != null && mounted) {
-      await ref
+      final diagnosticProbe =
+          _budgetParticipantDiagnosticsEnabled && rule == null;
+      if (diagnosticProbe && _recurringParticipantDiagnosticUsed) {
+        _showMessage('The one-time recurring diagnostic has already run.');
+        return;
+      }
+      if (diagnosticProbe) {
+        _recurringParticipantDiagnosticUsed = true;
+        _logRejectedParticipantMapping(
+          'recurring_expense_rules.insert',
+          snapshot.members,
+          values,
+        );
+        // The trigger runs before NOT NULL constraints, so this probe cannot
+        // persist a recurring rule even when participant validation passes.
+        values['title'] = null;
+      }
+      final saved = await ref
           .read(budgetControllerProvider.notifier)
           .saveRecurringRule(
             values,
             ruleId: rule?.id,
             expectedRevision: rule?.revision,
           );
+      if (diagnosticProbe && saved) {
+        _showMessage('Diagnostic stopped unexpectedly; do not retry.');
+      }
     }
   }
 

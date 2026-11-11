@@ -1,15 +1,40 @@
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:twogethera/features/authentication/application/auth_controller.dart';
 import 'package:twogethera/features/authentication/domain/auth_repository.dart';
 import 'package:twogethera/features/profile/application/profile_controller.dart';
 import 'package:twogethera/features/profile/domain/profile_repository.dart';
+import 'package:twogethera/features/profile/presentation/profile_sections.dart';
+
+class _ProfileAuth extends AuthController {
+  int reloadCalls = 0;
+
+  @override
+  AuthViewState build() => const AuthViewState(
+    AuthPhase.authenticated,
+    context: AccountContext(userId: 'user-a', spaces: []),
+  );
+
+  @override
+  Future<void> reloadContext() async {
+    reloadCalls++;
+    state = const AuthViewState(AuthPhase.refreshing);
+    await Future<void>.delayed(Duration.zero);
+    state = const AuthViewState(
+      AuthPhase.authenticated,
+      context: AccountContext(userId: 'user-a', spaces: []),
+    );
+  }
+}
 
 class _Profiles implements ProfileRepository {
   String? loadedUser;
   String? savedUser;
   int partnerLoads = 0;
+  String partnerName = 'Partner B';
   final avatars = <String, Uint8List>{};
   int avatarDownloads = 0;
   int avatarUploads = 0;
@@ -52,7 +77,7 @@ class _Profiles implements ProfileRepository {
   Future<PartnerProfile?> loadPartnerProfile() async {
     partnerLoads++;
     if (failPartnerLoad) throw const ProfileFailure();
-    return const PartnerProfile(displayName: 'Partner B');
+    return PartnerProfile(displayName: partnerName);
   }
 
   @override
@@ -170,7 +195,33 @@ void main() {
       container.read(profileControllerProvider).myProfile?.displayName,
       'New Name',
     );
+    expect(container.read(profileControllerProvider).myProfile?.about, 'About');
+    controller.clear();
+    await controller.load(const AccountContext(userId: 'user-a', spaces: []));
+    expect(
+      container.read(profileControllerProvider).myProfile?.displayName,
+      'New Name',
+    );
+    expect(container.read(profileControllerProvider).myProfile?.about, 'About');
   });
+
+  test(
+    'partner profile reflects the latest shared display name only',
+    () async {
+      repository.partnerName = 'Updated Partner';
+      await container
+          .read(profileControllerProvider.notifier)
+          .load(
+            const AccountContext(
+              userId: 'user-a',
+              spaces: [SpaceContext(id: 'couple', state: 'paired', epoch: 2)],
+            ),
+          );
+      final partner = container.read(profileControllerProvider).partnerProfile!;
+      expect(partner.displayName, 'Updated Partner');
+      expect(partner.avatarPath, isNull);
+    },
+  );
 
   test(
     'save failure retains the last saved profile and shows safe error',
@@ -240,6 +291,156 @@ void main() {
       expect(restored.myAvatarBytes, isNull);
       expect(repository.avatarUploads, 0);
       expect(repository.avatarDownloads, 0);
+    },
+  );
+
+  testWidgets('unsaved profile edits can be discarded deliberately', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        profileRepositoryProvider.overrideWithValue(repository),
+        authControllerProvider.overrideWith(() => _ProfileAuth()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ProfileSections(
+                account: AccountContext(userId: 'user-a', spaces: []),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final nameField = find.byType(TextFormField).first;
+    await tester.enterText(nameField, 'Unsaved Name');
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'), findsOneWidget);
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(find.text('Unsaved changes'), findsNothing);
+    final editable = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byType(TextFormField).first,
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(editable.controller.text, 'Partner A');
+  });
+
+  testWidgets('failed profile save retains the draft and shows feedback', (
+    tester,
+  ) async {
+    repository.failSave = true;
+    final container = ProviderContainer(
+      overrides: [
+        profileRepositoryProvider.overrideWithValue(repository),
+        authControllerProvider.overrideWith(() => _ProfileAuth()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ProfileSections(
+                account: AccountContext(userId: 'user-a', spaces: []),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final nameField = find.byType(TextFormField).first;
+    await tester.enterText(nameField, 'Unsaved Name');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    final editable = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byType(TextFormField).first,
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(editable.controller.text, 'Unsaved Name');
+    expect(
+      find.text('Your profile could not be saved. Try again.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'successful profile save remains visible without context reload',
+    (tester) async {
+      final auth = _ProfileAuth();
+      final container = ProviderContainer(
+        overrides: [
+          profileRepositoryProvider.overrideWithValue(repository),
+          authControllerProvider.overrideWith(() => auth),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: ProfileSections(
+                  account: AccountContext(userId: 'user-a', spaces: []),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'Saved Name');
+      await tester.enterText(
+        find.byType(TextFormField).last,
+        'Updated private note',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save changes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Saved Name'), findsOneWidget);
+      expect(find.text('Updated private note'), findsOneWidget);
+      expect(find.text('Your profile could not be displayed.'), findsNothing);
+      expect(auth.reloadCalls, 0);
+      expect(
+        container.read(authControllerProvider).context?.displayName,
+        'Saved Name',
+      );
+      expect(
+        container.read(profileControllerProvider).myProfile?.displayName,
+        'Saved Name',
+      );
+      expect(
+        container.read(profileControllerProvider).myProfile?.about,
+        'Updated private note',
+      );
+      container.read(profileControllerProvider.notifier).clear();
+      await container
+          .read(profileControllerProvider.notifier)
+          .load(const AccountContext(userId: 'user-a', spaces: []));
+      expect(
+        container.read(profileControllerProvider).myProfile?.displayName,
+        'Saved Name',
+      );
+      expect(
+        container.read(profileControllerProvider).myProfile?.about,
+        'Updated private note',
+      );
     },
   );
 }

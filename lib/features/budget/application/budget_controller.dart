@@ -89,6 +89,13 @@ class BudgetController extends Notifier<BudgetState> {
         month: normalized,
         snapshot: snapshot,
       );
+    } on BudgetOperationFailure catch (error) {
+      if (generation != _loadGeneration) return;
+      state = BudgetState(
+        coupleId: coupleId,
+        month: normalized,
+        error: error.message,
+      );
     } catch (_) {
       if (generation != _loadGeneration) return;
       if (state.coupleId == coupleId) {

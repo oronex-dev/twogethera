@@ -19,7 +19,7 @@ class _PairedAuth extends AuthController {
 }
 
 class _BudgetRepo implements BudgetRepository {
-  _BudgetRepo({this.failExpense = false}) {
+  _BudgetRepo({this.failExpense = false, this.loadFailures = 0}) {
     final currency = CurrencyUnit.byCode('USD')!;
     snapshot = BudgetSnapshot(
       budget: CoupleBudget(
@@ -42,12 +42,20 @@ class _BudgetRepo implements BudgetRepository {
 
   late BudgetSnapshot snapshot;
   final bool failExpense;
+  int loadFailures;
   Map<String, dynamic>? savedExpense;
   int loads = 0;
 
   @override
   Future<BudgetSnapshot> loadBudget(String coupleId, DateTime month) async {
     loads++;
+    if (loadFailures > 0) {
+      loadFailures--;
+      throw BudgetOperationFailure.fromPostgresCode(
+        '42501',
+        databaseMessage: 'active paired couple required',
+      );
+    }
     return snapshot;
   }
 
@@ -71,6 +79,39 @@ class _BudgetRepo implements BudgetRepository {
 }
 
 void main() {
+  testWidgets('budget access failure shows actionable cause and retry works', (
+    tester,
+  ) async {
+    final repository = _BudgetRepo(loadFailures: 1);
+    final container = ProviderContainer(
+      overrides: [
+        authControllerProvider.overrideWith(() => _PairedAuth()),
+        budgetRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: Scaffold(body: BudgetScreen())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('not currently active for both partners'),
+      findsOneWidget,
+    );
+    expect(repository.loads, 1);
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(repository.loads, 2);
+    expect(find.textContaining('Monthly overview'), findsOneWidget);
+    expect(
+      find.textContaining('not currently active for both partners'),
+      findsNothing,
+    );
+  });
+
   testWidgets('expense form reaches the repository with exact minor units', (
     tester,
   ) async {
@@ -93,6 +134,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.text('Export CSV'), findsOneWidget);
     await tester.ensureVisible(find.text('Add expense'));
     await tester.tap(find.text('Add expense'));
     await tester.pumpAndSettle();

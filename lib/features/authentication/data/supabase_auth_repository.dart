@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase/supabase.dart';
 
 import '../../dashboard/domain/dashboard_preferences.dart';
@@ -15,6 +15,21 @@ import '../../partner_linking/domain/partner_invitation_repository.dart';
 import '../../shared_planner/domain/shared_planner_repository.dart';
 import '../../profile/domain/profile_repository.dart';
 import 'local_auth_clients.dart';
+
+const _budgetDiagnosticsEnabled = bool.fromEnvironment(
+  'TWOTHERGA_BUDGET_DIAGNOSTICS',
+  defaultValue: false,
+);
+
+void _logBudgetDatabaseFailure(String operation, String? code) {
+  if (!_budgetDiagnosticsEnabled) return;
+  final safeCode = code != null && RegExp(r'^[0-9A-Z]{5}$').hasMatch(code)
+      ? code
+      : 'unknown';
+  debugPrint(
+    'Twogethera Budget request failed: operation=$operation sqlstate=$safeCode',
+  );
+}
 
 class SupabaseAuthRepository
     implements
@@ -1319,6 +1334,7 @@ class SupabaseAuthRepository
   Future<BudgetSnapshot> loadBudget(String coupleId, DateTime month) async {
     final clients = _authorizedClients();
     if (coupleId.isEmpty) throw const SharedPlannerFailure();
+    var operation = 'couple_budgets.select';
     try {
       final data = clients.data.schema('public');
       final monthStart = DateTime(month.year, month.month, 1);
@@ -1329,6 +1345,7 @@ class SupabaseAuthRepository
           .eq('couple_id', coupleId)
           .eq('month_start', monthKey)
           .limit(1);
+      operation = 'couple_memberships.select';
       final members = await data
           .from('couple_memberships')
           .select('user_id,seat')
@@ -1355,6 +1372,7 @@ class SupabaseAuthRepository
       if (budgetRows.isNotEmpty) {
         final rawBudget = Map<String, dynamic>.from(budgetRows.first);
         final budgetId = rawBudget['id'] as String;
+        operation = 'budget_category_limits.select';
         final categoryRows = await data
             .from('budget_category_limits')
             .select('category_key,limit_minor')
@@ -1367,6 +1385,7 @@ class SupabaseAuthRepository
               (map['limit_minor'] as num).toInt();
         }
         budget = CoupleBudget.fromJson(rawBudget, categoryLimits: categories);
+        operation = 'couple_expenses.select.month';
         final expenseRows = await data
             .from('couple_expenses')
             .select()
@@ -1383,6 +1402,7 @@ class SupabaseAuthRepository
       // Schedules are independent of a month-specific budget. Load them even
       // when the selected month has no budget, so they remain reviewable after
       // month navigation or refresh.
+      operation = 'recurring_expense_rules.select';
       final ruleRows = await data
           .from('recurring_expense_rules')
           .select()
@@ -1394,6 +1414,7 @@ class SupabaseAuthRepository
               RecurringExpenseRule.fromJson(Map<String, dynamic>.from(row)),
         ),
       );
+      operation = 'couple_expenses.select.recurring_occurrences';
       final occurrenceRows = await data
           .from('couple_expenses')
           .select('recurring_rule_id,recurrence_key')
@@ -1416,6 +1437,12 @@ class SupabaseAuthRepository
         recurringRules: List.unmodifiable(rules),
         members: List.unmodifiable(memberList),
         recurringOccurrences: List.unmodifiable(occurrences),
+      );
+    } on PostgrestException catch (error) {
+      _logBudgetDatabaseFailure(operation, error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
       );
     } catch (_) {
       throw const SharedPlannerFailure();
@@ -1443,7 +1470,11 @@ class SupabaseAuthRepository
       }, onConflict: 'couple_id,month_start');
       clients.validSession();
     } on PostgrestException catch (error) {
-      throw BudgetOperationFailure.fromPostgresCode(error.code);
+      _logBudgetDatabaseFailure('couple_budgets.upsert', error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
+      );
     } catch (_) {
       throw const BudgetOperationFailure(
         'The monthly budget could not be saved. Refresh and try again.',
@@ -1474,7 +1505,11 @@ class SupabaseAuthRepository
       );
       clients.validSession();
     } on PostgrestException catch (error) {
-      throw BudgetOperationFailure.fromPostgresCode(error.code);
+      _logBudgetDatabaseFailure('budget_category_limits.upsert', error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
+      );
     } catch (_) {
       throw const BudgetOperationFailure(
         'The category limit could not be saved. Refresh and try again.',
@@ -1492,6 +1527,7 @@ class SupabaseAuthRepository
     int? expectedRevision,
   }) async {
     final clients = _authorizedClients();
+    var operation = 'couple_expenses.insert';
     try {
       final table = clients.data.schema('public').from('couple_expenses');
       if (expenseId == null) {
@@ -1503,6 +1539,7 @@ class SupabaseAuthRepository
           'currency_exponent': currency.exponent,
         });
       } else {
+        operation = 'couple_expenses.update';
         if (expectedRevision == null) throw const SharedPlannerFailure();
         final result = await table
             .update(values)
@@ -1515,7 +1552,11 @@ class SupabaseAuthRepository
       }
       clients.validSession();
     } on PostgrestException catch (error) {
-      throw BudgetOperationFailure.fromPostgresCode(error.code);
+      _logBudgetDatabaseFailure(operation, error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
+      );
     } catch (_) {
       throw const BudgetOperationFailure(
         'The expense could not be saved. Refresh and try again.',
@@ -1538,9 +1579,23 @@ class SupabaseAuthRepository
             },
           );
       clients.validSession();
-      if (result != true) throw const SharedPlannerFailure();
+      if (result != true) {
+        throw const BudgetOperationFailure(
+          'The expense could not be deleted. It may have changed or shared access may no longer be active. Refresh and try again.',
+        );
+      }
+    } on BudgetOperationFailure {
+      rethrow;
+    } on PostgrestException catch (error) {
+      _logBudgetDatabaseFailure('delete_couple_expense.rpc', error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
+      );
     } catch (_) {
-      throw const SharedPlannerFailure();
+      throw const BudgetOperationFailure(
+        'The expense could not be deleted. Refresh and try again.',
+      );
     }
   }
 
@@ -1552,6 +1607,7 @@ class SupabaseAuthRepository
     int? expectedRevision,
   }) async {
     final clients = _authorizedClients();
+    var operation = 'recurring_expense_rules.insert';
     try {
       final table = clients.data
           .schema('public')
@@ -1559,6 +1615,7 @@ class SupabaseAuthRepository
       if (ruleId == null) {
         await table.insert({...values, 'couple_id': coupleId});
       } else {
+        operation = 'recurring_expense_rules.update';
         if (expectedRevision == null) {
           throw const BudgetOperationFailure(
             'Refresh the schedule before editing it.',
@@ -1581,7 +1638,11 @@ class SupabaseAuthRepository
     } on BudgetOperationFailure {
       rethrow;
     } on PostgrestException catch (error) {
-      throw BudgetOperationFailure.fromPostgresCode(error.code);
+      _logBudgetDatabaseFailure(operation, error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
+      );
     } catch (_) {
       throw const BudgetOperationFailure(
         'The recurring schedule could not be saved. Refresh and try again.',
@@ -1615,7 +1676,11 @@ class SupabaseAuthRepository
     } on BudgetOperationFailure {
       rethrow;
     } on PostgrestException catch (error) {
-      throw BudgetOperationFailure.fromPostgresCode(error.code);
+      _logBudgetDatabaseFailure('recurring_expense_rules.toggle', error.code);
+      throw BudgetOperationFailure.fromPostgresCode(
+        error.code,
+        databaseMessage: error.message,
+      );
     } catch (_) {
       throw const BudgetOperationFailure(
         'The recurring schedule could not be changed. Refresh and try again.',
@@ -1663,9 +1728,11 @@ class SupabaseAuthRepository
       });
       clients.validSession();
     } on PostgrestException catch (error) {
+      _logBudgetDatabaseFailure('couple_expenses.insert.recurring', error.code);
       throw BudgetOperationFailure.fromPostgresCode(
         error.code,
         duplicateOccurrence: true,
+        databaseMessage: error.message,
       );
     } catch (_) {
       throw const BudgetOperationFailure(
